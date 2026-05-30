@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ArtifactHub - Base Workspace</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <header class="app-header">
+        <div class="logo">ArtifactHub</div>
+        <div class="subtitle">Phase 1 VS Code Base Workspace</div>
+    </header>
+
+    <div class="app-container">
+        <aside class="sidebar">
+            <h3>Artifact Library</h3>
+            <ul id="template-menu-list">
+                <li class="loading">Loading library list menu...</li>
+            </ul>
+        </aside>
+
+        <main class="workspace">
+            <div id="welcome-message">
+                <h2>Welcome to your Artifact Workspace</h2>
+                <p>Select a Project Management or Business Analysis artifact from the navigation sidebar menu to build your dynamic document input fields.</p>
+            </div>
+
+            <div id="active-template-container" class="hidden">
+                <h2 id="template-title">Template Title</h2>
+                <p id="template-description">Template description data details placeholder.</p>
+                <hr>
+                <form id="artifact-form">
+                    <div id="form-fields-bucket"></div>
+                    <button type="submit" class="btn-save">Export / Save Document</button>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

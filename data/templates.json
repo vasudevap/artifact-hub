@@ -1,0 +1,29 @@
+{
+  "project-charter": {
+    "title": "Project Charter (PM - Initiation)",
+    "description": "Establishes formal authorization for a new project and outlines objectives.",
+    "fields": [
+      {"id": "project_name", "label": "Project Name", "type": "text", "placeholder": "e.g., E-Commerce Checkout Optimization"},
+      {"id": "objective", "label": "Project Objective", "type": "textarea", "placeholder": "What business problem does this solve?"},
+      {"id": "scope", "label": "High-Level Scope", "type": "textarea", "placeholder": "Inclusions and exclusions..."},
+      {"id": "sponsor", "label": "Project Sponsor", "type": "text", "placeholder": "Executive stakeholder name"}
+    ]
+  },
+  "brd": {
+    "title": "Business Requirements Document (BA - Elicitation)",
+    "description": "Deep dive into business needs, user profiles, and operational parameters.",
+    "fields": [
+      {"id": "brd_title", "label": "Document Title", "type": "text", "placeholder": "e.g., BRD - Automated Inventory System"},
+      {"id": "user_personas", "label": "Target User Personas", "type": "textarea", "placeholder": "Who will use this system?"},
+      {"id": "functional_reqs", "label": "Core Functional Requirements", "type": "textarea", "placeholder": "The system MUST allow users to..."}
+    ]
+  },
+  "raid-log": {
+    "title": "RAID Log Matrix (PM - Monitoring)",
+    "description": "Tracks Risks, Assumptions, Issues, and Dependencies throughout delivery.",
+    "fields": [
+      {"id": "risk_desc", "label": "Risk Description", "type": "textarea", "placeholder": "Describe a potential risk event..."},
+      {"id": "mitigation", "label": "Mitigation Strategy", "type": "textarea", "placeholder": "How will you reduce or prevent this risk?"}
+    ]
+  }
+}
