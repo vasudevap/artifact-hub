@@ -6,6 +6,17 @@ ArtifactHub is a web application that helps project and delivery teams create pr
 
 The current prototype already demonstrates a template library and dynamic form rendering. The next product phase should evolve ArtifactHub into an AI-assisted workspace that reduces blank-page friction, standardizes documentation quality, and allows users to reuse project context across multiple artifacts.
 
+### Current milestone status
+
+ArtifactHub is now deployed publicly on Render as a live demo environment. This validates that the Phase 1 prototype can be run on the web as a real hosted application rather than only as a local prototype.
+
+Important deployment constraint:
+
+- The current deployment still relies on JSON files in `data/` for users, sessions, projects, and artifacts.
+- Render free web services use ephemeral local storage.
+- As a result, the live deployment is suitable for demos and early smoke testing, but not yet for durable user data.
+- A durable hosted database is the next required infrastructure step before treating the app as a stable online product.
+
 ## 2. Problem Statement
 
 Project documentation is often slow, repetitive, and uneven in quality. Teams struggle with:
@@ -47,6 +58,7 @@ The core product promise:
 - The AI can populate structured fields from conversation
 - The user can review, edit, save, resume, and export the artifact
 - A usable first draft can be produced in less than 15 minutes for common templates
+- The application can be deployed as a live hosted web app with durable storage suitable for real user continuity
 
 ### Product metrics
 
@@ -155,6 +167,7 @@ Requirements:
 Design expectation:
 
 - Phase 1 should not expose all project data to all visitors. Shared data may be acceptable for a local-only demo, but not for a deployed product.
+- The current hosted demo now satisfies the privacy direction at the application layer, but durable persistence still needs to move off local JSON storage before the hosted environment should be treated as production-capable.
 
 ### 9.2 Project Workspace
 
@@ -242,6 +255,10 @@ Requirements:
 - Track updated timestamps and status
 - Maintain version snapshots for artifacts
 - Allow users to view prior saved versions in later phases
+
+Current implementation note:
+
+- The hosted Render demo does not yet satisfy durable persistence requirements because the underlying JSON file storage is ephemeral in that environment.
 
 ### 9.8 Export
 
