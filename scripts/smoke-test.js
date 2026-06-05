@@ -73,6 +73,30 @@ async function run() {
       })
       .expect(200);
 
+    await agent
+      .post("/api/auth/password-change")
+      .send({
+        currentPassword: "new-password123",
+        newPassword: "changed-password123",
+      })
+      .expect(200);
+
+    await request(app)
+      .post("/api/auth/login")
+      .send({
+        email,
+        password: "new-password123",
+      })
+      .expect(401);
+
+    await agent
+      .post("/api/auth/login")
+      .send({
+        email,
+        password: "changed-password123",
+      })
+      .expect(200);
+
     await agent.get("/api/projects").expect(200, []);
 
     const projectResponse = await agent

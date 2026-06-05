@@ -16,7 +16,9 @@
                         <path d="M12 3.5 4 10v10h5.5v-6h5v6H20V10l-8-6.5Z" />
                     </svg>
                 </button>
-                <span id="current-user-label" class="subtitle">Signed out</span>
+                <button id="current-user-button" class="account-button hidden" type="button" aria-haspopup="dialog" aria-expanded="false">
+                    <span id="current-user-label" class="subtitle">Signed out</span>
+                </button>
                 <button id="logout-button" class="btn-header hidden" type="button">Log out</button>
             </div>
     </header>
@@ -39,7 +41,10 @@
 
             <div class="form-group">
                 <label for="auth-password">Password</label>
-                <input id="auth-password" class="form-control" type="password" placeholder="At least 8 characters" required>
+                <div class="password-field">
+                    <input id="auth-password" class="form-control" type="password" placeholder="At least 8 characters" required>
+                    <button class="password-toggle" type="button" data-password-target="auth-password" aria-label="Show password">Show</button>
+                </div>
             </div>
 
             <button id="auth-submit-button" class="btn-save" type="submit">Sign in</button>
@@ -117,6 +122,66 @@
                 </form>
             </div>
         </main>
+    </div>
+
+    <div id="account-modal" class="modal-overlay hidden" role="presentation">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+            <div class="modal-header">
+                <div>
+                    <h2 id="account-modal-title">Account</h2>
+                    <p>Change the password for your signed-in workspace.</p>
+                </div>
+                <button id="close-account-modal-button" class="icon-button modal-close-button" type="button" aria-label="Close account settings">
+                    &#10005;
+                </button>
+            </div>
+            <form id="change-password-form">
+                <div class="form-group">
+                    <label for="current-password">Current Password</label>
+                    <div class="password-field">
+                        <input id="current-password" class="form-control" type="password" autocomplete="current-password" required>
+                        <button class="password-toggle" type="button" data-password-target="current-password" aria-label="Show password">Show</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="new-password">New Password</label>
+                    <div class="password-field">
+                        <input id="new-password" class="form-control" type="password" autocomplete="new-password" placeholder="At least 8 characters" required>
+                        <button class="password-toggle" type="button" data-password-target="new-password" aria-label="Show password">Show</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="confirm-password">Confirm New Password</label>
+                    <div class="password-field">
+                        <input id="confirm-password" class="form-control" type="password" autocomplete="new-password" placeholder="Re-enter your new password" required>
+                        <button class="password-toggle" type="button" data-password-target="confirm-password" aria-label="Show password">Show</button>
+                    </div>
+                </div>
+                <p id="change-password-message" class="status-message"></p>
+                <div class="modal-actions">
+                    <button id="cancel-account-modal-button" class="btn-secondary" type="button">Cancel</button>
+                    <button id="change-password-submit-button" class="btn-save" type="submit">Update Password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="confirm-modal" class="modal-overlay hidden" role="presentation">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+            <div class="modal-header">
+                <div>
+                    <h2 id="confirm-modal-title">Confirm Action</h2>
+                    <p id="confirm-modal-message">Are you sure you want to continue?</p>
+                </div>
+                <button id="close-confirm-modal-button" class="icon-button modal-close-button" type="button" aria-label="Close confirmation dialog">
+                    &#10005;
+                </button>
+            </div>
+            <div class="modal-actions">
+                <button id="cancel-confirm-modal-button" class="btn-secondary" type="button">Cancel</button>
+                <button id="confirm-modal-submit-button" class="btn-save btn-danger" type="button">Delete</button>
+            </div>
+        </div>
     </div>
 
     <script src="js/app.js"></script>

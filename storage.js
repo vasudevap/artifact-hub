@@ -544,6 +544,28 @@ async function getUserByEmail(email) {
   return result.rows[0] || null;
 }
 
+async function getUserById(userId) {
+  if (!USE_DATABASE) {
+    const users = await readJsonFile(USERS_FILE, []);
+    return users.find((user) => user.id === userId) || null;
+  }
+
+  const result = await pool.query(
+    `SELECT
+       id,
+       name,
+       email,
+       password_hash AS "passwordHash",
+       created_at AS "createdAt",
+       updated_at AS "updatedAt"
+     FROM users
+     WHERE id = $1`,
+    [userId],
+  );
+
+  return result.rows[0] || null;
+}
+
 async function getUserBySessionToken(token) {
   if (!USE_DATABASE) {
     const [sessions, users] = await Promise.all([
@@ -769,6 +791,55 @@ async function resetPasswordWithToken({ token, passwordHash }) {
   }
 }
 
+async function changePasswordForUser({ userId, passwordHash }) {
+  const timestamp = nowIso();
+
+  if (!USE_DATABASE) {
+    const [users, sessions] = await Promise.all([
+      readJsonFile(USERS_FILE, []),
+      readJsonFile(SESSIONS_FILE, []),
+    ]);
+    const user = users.find((item) => item.id === userId);
+
+    if (!user) {
+      return false;
+    }
+
+    user.passwordHash = passwordHash;
+    user.updatedAt = timestamp;
+
+    await Promise.all([
+      writeJsonFile(USERS_FILE, users),
+      writeJsonFile(
+        SESSIONS_FILE,
+        sessions.filter((session) => session.userId !== user.id),
+      ),
+    ]);
+
+    return true;
+  }
+
+  const result = await pool.query(
+    `UPDATE users
+     SET password_hash = $2,
+         updated_at = $3
+     WHERE id = $1`,
+    [userId, passwordHash, timestamp],
+  );
+
+  if (result.rowCount === 0) {
+    return false;
+  }
+
+  await pool.query(
+    `DELETE FROM sessions
+     WHERE user_id = $1`,
+    [userId],
+  );
+
+  return true;
+}
+
 async function deleteSessionByToken(token) {
   if (!USE_DATABASE) {
     const sessions = await readJsonFile(SESSIONS_FILE, []);
@@ -787,6 +858,7 @@ async function deleteSessionByToken(token) {
 export {
   USE_DATABASE,
   createArtifact,
+  changePasswordForUser,
   createProject,
   createPasswordReset,
   createSession,
@@ -796,6 +868,7 @@ export {
   deleteSessionByToken,
   getProjectByIdAndOwnerId,
   getStorageHealth,
+  getUserById,
   getUserByEmail,
   getUserBySessionToken,
   initDatabase,

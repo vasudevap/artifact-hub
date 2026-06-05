@@ -12,8 +12,36 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   const authMessage = document.getElementById("auth-message");
   const homeButton = document.getElementById("home-button");
+  const currentUserButton = document.getElementById("current-user-button");
   const currentUserLabel = document.getElementById("current-user-label");
   const logoutButton = document.getElementById("logout-button");
+  const accountModal = document.getElementById("account-modal");
+  const closeAccountModalButton = document.getElementById(
+    "close-account-modal-button",
+  );
+  const cancelAccountModalButton = document.getElementById(
+    "cancel-account-modal-button",
+  );
+  const changePasswordForm = document.getElementById("change-password-form");
+  const currentPasswordInput = document.getElementById("current-password");
+  const newPasswordInput = document.getElementById("new-password");
+  const confirmPasswordInput = document.getElementById("confirm-password");
+  const changePasswordMessage = document.getElementById(
+    "change-password-message",
+  );
+  const confirmModal = document.getElementById("confirm-modal");
+  const confirmModalTitle = document.getElementById("confirm-modal-title");
+  const confirmModalMessage = document.getElementById("confirm-modal-message");
+  const closeConfirmModalButton = document.getElementById(
+    "close-confirm-modal-button",
+  );
+  const cancelConfirmModalButton = document.getElementById(
+    "cancel-confirm-modal-button",
+  );
+  const confirmModalSubmitButton = document.getElementById(
+    "confirm-modal-submit-button",
+  );
+  const passwordToggleButtons = document.querySelectorAll(".password-toggle");
   const projectList = document.getElementById("project-list");
   const showProjectFormButton = document.getElementById(
     "show-project-form-button",
@@ -56,6 +84,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let isSavingArtifact = false;
   let pendingSave = false;
   let hasUnsavedChanges = false;
+  let isChangingPassword = false;
+  let confirmResolver = null;
   const newArtifactIds = new Set();
 
   fetch("/api/templates")
@@ -80,8 +110,10 @@ document.addEventListener("DOMContentLoaded", () => {
     authView.classList.remove("hidden");
     appView.classList.add("hidden");
     homeButton.classList.add("hidden");
+    currentUserButton.classList.add("hidden");
     logoutButton.classList.add("hidden");
     currentUserLabel.textContent = "Signed out";
+    closeAccountModal();
   }
 
   function showAppView(user) {
@@ -89,8 +121,10 @@ document.addEventListener("DOMContentLoaded", () => {
     authView.classList.add("hidden");
     appView.classList.remove("hidden");
     homeButton.classList.remove("hidden");
+    currentUserButton.classList.remove("hidden");
     logoutButton.classList.remove("hidden");
     currentUserLabel.textContent = user.name;
+    currentUserButton.setAttribute("aria-expanded", "false");
     loadProjects();
   }
 
@@ -109,6 +143,8 @@ document.addEventListener("DOMContentLoaded", () => {
     authPassword.placeholder = isReset
       ? "New password, at least 8 characters"
       : "At least 8 characters";
+    resetPasswordField(authPassword);
+    resetPasswordVisibility();
 
     if (isSignup) {
       authSubmitButton.textContent = "Create account";
@@ -147,6 +183,48 @@ document.addEventListener("DOMContentLoaded", () => {
         textContent: "set a new password",
       }),
     );
+  }
+
+  function updatePasswordToggle(button, input) {
+    const isVisible = input.type === "text";
+    button.textContent = isVisible ? "Hide" : "Show";
+    button.setAttribute(
+      "aria-label",
+      `${isVisible ? "Hide" : "Show"} password`,
+    );
+  }
+
+  function togglePasswordVisibility(button) {
+    const input = document.getElementById(button.dataset.passwordTarget);
+
+    if (!input) {
+      return;
+    }
+
+    input.type = input.type === "password" ? "text" : "password";
+    updatePasswordToggle(button, input);
+  }
+
+  function resetPasswordField(input) {
+    if (!input) {
+      return;
+    }
+
+    input.value = "";
+    input.type = "password";
+  }
+
+  function resetPasswordVisibility() {
+    passwordToggleButtons.forEach((button) => {
+      const input = document.getElementById(button.dataset.passwordTarget);
+
+      if (!input) {
+        return;
+      }
+
+      input.type = "password";
+      updatePasswordToggle(button, input);
+    });
   }
 
   async function loadCurrentUser() {
@@ -647,6 +725,128 @@ document.addEventListener("DOMContentLoaded", () => {
     projectMessage.dataset.tone = tone;
   }
 
+  function setChangePasswordMessage(message, tone = "") {
+    changePasswordMessage.textContent = message;
+    changePasswordMessage.dataset.tone = tone;
+  }
+
+  function openAccountModal() {
+    if (!currentUser) {
+      return;
+    }
+
+    changePasswordForm.reset();
+    resetPasswordField(currentPasswordInput);
+    resetPasswordField(newPasswordInput);
+    resetPasswordField(confirmPasswordInput);
+    resetPasswordVisibility();
+    setChangePasswordMessage("");
+    accountModal.classList.remove("hidden");
+    currentUserButton.setAttribute("aria-expanded", "true");
+    currentPasswordInput.focus();
+  }
+
+  function closeAccountModal() {
+    accountModal.classList.add("hidden");
+    currentUserButton.setAttribute("aria-expanded", "false");
+    changePasswordForm.reset();
+    resetPasswordField(currentPasswordInput);
+    resetPasswordField(newPasswordInput);
+    resetPasswordField(confirmPasswordInput);
+    resetPasswordVisibility();
+    setChangePasswordMessage("");
+    isChangingPassword = false;
+  }
+
+  async function submitPasswordChange(event) {
+    event.preventDefault();
+
+    if (isChangingPassword) {
+      return;
+    }
+
+    if (newPasswordInput.value !== confirmPasswordInput.value) {
+      setChangePasswordMessage(
+        "New password and confirmation must match.",
+        "error",
+      );
+      return;
+    }
+
+    setChangePasswordMessage("Updating password...", "working");
+    isChangingPassword = true;
+
+    try {
+      const response = await fetch("/api/auth/password-change", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          currentPassword: currentPasswordInput.value,
+          newPassword: newPasswordInput.value,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setChangePasswordMessage(
+          data.error || "Unable to change password.",
+          "error",
+        );
+        return;
+      }
+
+      currentUser = data.user || currentUser;
+      setChangePasswordMessage(
+        "Password updated. You're still signed in with the new password.",
+        "success",
+      );
+      changePasswordForm.reset();
+      setTimeout(() => {
+        if (!accountModal.classList.contains("hidden")) {
+          closeAccountModal();
+        }
+      }, 900);
+    } catch (error) {
+      setChangePasswordMessage("Unable to reach the server.", "error");
+    } finally {
+      isChangingPassword = false;
+    }
+  }
+
+  function openConfirmModal({
+    title = "Confirm Action",
+    message = "Are you sure you want to continue?",
+    confirmLabel = "Confirm",
+  }) {
+    confirmModalTitle.textContent = title;
+    confirmModalMessage.textContent = message;
+    confirmModalSubmitButton.textContent = confirmLabel;
+    confirmModal.classList.remove("hidden");
+    confirmModalSubmitButton.focus();
+  }
+
+  function closeConfirmModal(confirmed = false) {
+    confirmModal.classList.add("hidden");
+    if (confirmResolver) {
+      const resolve = confirmResolver;
+      confirmResolver = null;
+      resolve(confirmed);
+    }
+  }
+
+  function confirmWithModal(options) {
+    if (confirmResolver) {
+      return Promise.resolve(false);
+    }
+
+    openConfirmModal(options);
+    return new Promise((resolve) => {
+      confirmResolver = resolve;
+    });
+  }
+
   function updateArtifactExportButton() {
     artifactExportButton.classList.toggle("hidden", !activeArtifact);
   }
@@ -722,9 +922,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function deleteProject(projectId, projectName) {
-    const confirmed = confirm(
-      `Delete "${projectName}" and all of its artifacts? This cannot be undone.`,
-    );
+    const confirmed = await confirmWithModal({
+      title: "Delete Project",
+      message: `Delete "${projectName}" and all of its artifacts? This cannot be undone.`,
+      confirmLabel: "Delete Project",
+    });
 
     if (!confirmed) {
       return;
@@ -757,9 +959,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const confirmed = confirm(
-      `Delete "${artifactTitle}" from this project? This cannot be undone.`,
-    );
+    const confirmed = await confirmWithModal({
+      title: "Delete Artifact",
+      message: `Delete "${artifactTitle}" from this project? This cannot be undone.`,
+      confirmLabel: "Delete Artifact",
+    });
 
     if (!confirmed) {
       return;
@@ -808,6 +1012,14 @@ document.addEventListener("DOMContentLoaded", () => {
   artifactExportButton.addEventListener("click", exportActiveArtifact);
 
   showProjectFormButton.addEventListener("click", showProjectForm);
+  passwordToggleButtons.forEach((button) => {
+    const input = document.getElementById(button.dataset.passwordTarget);
+    if (input) {
+      updatePasswordToggle(button, input);
+    }
+
+    button.addEventListener("click", () => togglePasswordVisibility(button));
+  });
 
   projectForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -942,6 +1154,24 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  currentUserButton.addEventListener("click", openAccountModal);
+  closeAccountModalButton.addEventListener("click", closeAccountModal);
+  cancelAccountModalButton.addEventListener("click", closeAccountModal);
+  changePasswordForm.addEventListener("submit", submitPasswordChange);
+  accountModal.addEventListener("click", (event) => {
+    if (event.target === accountModal) {
+      closeAccountModal();
+    }
+  });
+  closeConfirmModalButton.addEventListener("click", () => closeConfirmModal(false));
+  cancelConfirmModalButton.addEventListener("click", () => closeConfirmModal(false));
+  confirmModalSubmitButton.addEventListener("click", () => closeConfirmModal(true));
+  confirmModal.addEventListener("click", (event) => {
+    if (event.target === confirmModal) {
+      closeConfirmModal(false);
+    }
+  });
+
   logoutButton.addEventListener("click", async () => {
     try {
       await fetch("/api/auth/logout", {
@@ -969,6 +1199,21 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     window.location.reload();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    if (!confirmModal.classList.contains("hidden")) {
+      closeConfirmModal(false);
+      return;
+    }
+
+    if (!accountModal.classList.contains("hidden")) {
+      closeAccountModal();
+    }
   });
 
   updateAuthMode();

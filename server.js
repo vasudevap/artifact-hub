@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import crypto from "crypto";
 import {
+  changePasswordForUser,
   createArtifact,
   createPasswordReset,
   createProject,
@@ -15,6 +16,7 @@ import {
   deleteSessionByToken,
   getProjectByIdAndOwnerId,
   getStorageHealth,
+  getUserById,
   getUserByEmail,
   getUserBySessionToken,
   initDatabase,
@@ -313,6 +315,59 @@ app.post("/api/auth/password-reset/confirm", async (req, res) => {
   } catch (error) {
     console.error("Failed to reset password.", error);
     res.status(500).json({ error: "Failed to reset password." });
+  }
+});
+
+app.post("/api/auth/password-change", requireAuth, async (req, res) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || "");
+    const newPassword = String(req.body.newPassword || "");
+
+    if (!currentPassword || newPassword.length < 8) {
+      return res.status(400).json({
+        error:
+          "Your current password and a new password of at least 8 characters are required.",
+      });
+    }
+
+    const user = await getUserById(req.user.id);
+
+    if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
+      return res.status(401).json({ error: "Your current password is incorrect." });
+    }
+
+    if (verifyPassword(newPassword, user.passwordHash)) {
+      return res.status(400).json({
+        error: "Choose a new password that is different from your current password.",
+      });
+    }
+
+    const changed = await changePasswordForUser({
+      userId: user.id,
+      passwordHash: hashPassword(newPassword),
+    });
+
+    if (!changed) {
+      return res.status(404).json({ error: "Account not found." });
+    }
+
+    const session = await createSession({
+      userId: user.id,
+      token: crypto.randomBytes(32).toString("hex"),
+    });
+    setSessionCookie(res, session.token);
+
+    res.json({
+      ok: true,
+      user: safeUser({
+        ...user,
+        passwordHash: undefined,
+        updatedAt: new Date().toISOString(),
+      }),
+    });
+  } catch (error) {
+    console.error("Failed to change password.", error);
+    res.status(500).json({ error: "Failed to change password." });
   }
 });
 
