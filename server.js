@@ -88,6 +88,55 @@ function clearSessionCookie(res) {
   );
 }
 
+async function readTemplates() {
+  const data = await fs.readFile(
+    path.join(__dirname, "data", "templates.json"),
+    "utf-8",
+  );
+  return JSON.parse(data);
+}
+
+function markdownValue(value) {
+  const text = String(value || "").trim();
+  return text || "_Not provided._";
+}
+
+function slugifyFilename(value) {
+  return String(value || "artifact")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "artifact";
+}
+
+function renderArtifactMarkdown({ artifact, project, template }) {
+  const lines = [
+    `# ${artifact.title || template.title || "Artifact"}`,
+    "",
+    `Project: ${project.name}`,
+    `Template: ${template.title || artifact.templateId}`,
+    `Status: ${artifact.status}`,
+    `Last updated: ${artifact.updatedAt}`,
+    "",
+  ];
+
+  if (project.sponsor) {
+    lines.push(`Sponsor: ${project.sponsor}`, "");
+  }
+
+  if (project.objective) {
+    lines.push("## Project Objective", "", markdownValue(project.objective), "");
+  }
+
+  lines.push("## Artifact Content", "");
+
+  for (const field of template.fields || []) {
+    lines.push(`### ${field.label}`, "", markdownValue(artifact.fieldValues?.[field.id]), "");
+  }
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
 async function getCurrentUser(req) {
   const cookies = parseCookies(req);
   const token = cookies[SESSION_COOKIE_NAME];
@@ -364,14 +413,57 @@ app.delete(
   },
 );
 
+app.get(
+  "/api/projects/:projectId/artifacts/:artifactId/export.md",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const project = await getProjectByIdAndOwnerId(
+        req.params.projectId,
+        req.user.id,
+      );
+
+      if (!project) {
+        return res.status(404).json({ error: "Project not found." });
+      }
+
+      const artifact = project.artifacts.find(
+        (item) => item.id === req.params.artifactId,
+      );
+
+      if (!artifact) {
+        return res.status(404).json({ error: "Artifact not found." });
+      }
+
+      const templates = await readTemplates();
+      const template = templates[artifact.templateId];
+
+      if (!template) {
+        return res.status(404).json({ error: "Template not found." });
+      }
+
+      const markdown = renderArtifactMarkdown({ artifact, project, template });
+      const filename = `${slugifyFilename(project.name)}-${slugifyFilename(
+        artifact.title,
+      )}.md`;
+
+      res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+      res.send(markdown);
+    } catch (error) {
+      console.error("Failed to export artifact.", error);
+      res.status(500).json({ error: "Failed to export artifact." });
+    }
+  },
+);
+
 // API Route: Fetch clean summaries for navigation sidebar menu construction
 app.get("/api/templates", async (req, res) => {
   try {
-    const data = await fs.readFile(
-      path.join(__dirname, "data", "templates.json"),
-      "utf-8",
-    );
-    const templates = JSON.parse(data);
+    const templates = await readTemplates();
     const summary = Object.keys(templates).map((key) => ({
       id: key,
       title: templates[key].title,
@@ -387,11 +479,7 @@ app.get("/api/templates", async (req, res) => {
 // API Route: Fetch functional breakdown fields matrix for selected workspace index canvas
 app.get("/api/templates/:id", async (req, res) => {
   try {
-    const data = await fs.readFile(
-      path.join(__dirname, "data", "templates.json"),
-      "utf-8",
-    );
-    const templates = JSON.parse(data);
+    const templates = await readTemplates();
     const template = templates[req.params.id];
 
     if (!template) {

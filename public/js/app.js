@@ -35,6 +35,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const fieldsBucket = document.getElementById("form-fields-bucket");
   const artifactForm = document.getElementById("artifact-form");
   const artifactSaveStatus = document.getElementById("artifact-save-status");
+  const artifactExportButton = document.getElementById(
+    "artifact-export-button",
+  );
 
   let currentUser = null;
   let authMode = "login";
@@ -362,6 +365,7 @@ document.addEventListener("DOMContentLoaded", () => {
       activeContainer.classList.remove("hidden");
 
       renderTemplateFields(activeTemplate, {});
+      updateArtifactExportButton();
       setArtifactSaveStatus(getTemplatePreviewStatus());
       if (activeProject) {
         renderArtifactSummary(activeProject);
@@ -404,6 +408,7 @@ document.addEventListener("DOMContentLoaded", () => {
       activeContainer.classList.remove("hidden");
 
       renderTemplateFields(activeTemplate, artifact.fieldValues || {});
+      updateArtifactExportButton();
       setArtifactSaveStatus(
         `Last saved ${formatDateTime(artifact.updatedAt)}. Your changes are stored.`,
         "success",
@@ -517,6 +522,7 @@ document.addEventListener("DOMContentLoaded", () => {
         activeArtifact = artifact;
         newArtifactIds.add(artifact.id);
         activeProject.artifacts.unshift(artifact);
+        updateArtifactExportButton();
       } else {
         response = await fetch(
           `/api/projects/${activeProject.id}/artifacts/${activeArtifact.id}`,
@@ -539,6 +545,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         activeArtifact = artifact;
+        updateArtifactExportButton();
         activeProject.artifacts = activeProject.artifacts.map((item) =>
           item.id === artifact.id ? artifact : item,
         );
@@ -590,6 +597,27 @@ document.addEventListener("DOMContentLoaded", () => {
     projectMessage.dataset.tone = tone;
   }
 
+  function updateArtifactExportButton() {
+    artifactExportButton.classList.toggle("hidden", !activeArtifact);
+  }
+
+  function exportActiveArtifact() {
+    if (!activeProject || !activeArtifact) {
+      return;
+    }
+
+    if (
+      hasUnsavedChanges &&
+      !confirm("Export the last saved version? Unsaved changes are not included.")
+    ) {
+      return;
+    }
+
+    const projectId = encodeURIComponent(activeProject.id);
+    const artifactId = encodeURIComponent(activeArtifact.id);
+    window.location.href = `/api/projects/${projectId}/artifacts/${artifactId}/export.md`;
+  }
+
   function getTemplatePreviewStatus() {
     return projects.length === 0
       ? "Please create a project first to save this template as a draft."
@@ -605,6 +633,7 @@ document.addEventListener("DOMContentLoaded", () => {
     hasUnsavedChanges = false;
     fieldsBucket.innerHTML = "";
     setArtifactSaveStatus("");
+    updateArtifactExportButton();
   }
 
   function shouldConfirmRefresh() {
@@ -725,6 +754,8 @@ document.addEventListener("DOMContentLoaded", () => {
   artifactForm.addEventListener("submit", (event) => {
     event.preventDefault();
   });
+
+  artifactExportButton.addEventListener("click", exportActiveArtifact);
 
   showProjectFormButton.addEventListener("click", showProjectForm);
 

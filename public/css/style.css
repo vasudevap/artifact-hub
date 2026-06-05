@@ -375,6 +375,23 @@ textarea.form-control {
     color: #b91c1c;
 }
 
+.artifact-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.artifact-actions .status-message {
+    margin-right: auto;
+}
+
+.btn-export {
+    margin-left: 0;
+    padding: 9px 12px;
+}
+
 .project-form-panel {
     background-color: var(--bg-card);
     border: 1px solid var(--border);

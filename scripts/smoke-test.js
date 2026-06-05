@@ -52,6 +52,32 @@ async function run() {
       throw new Error("Expected one project after creation.");
     }
 
+    const artifactResponse = await agent
+      .post(`/api/projects/${projectResponse.body.id}/artifacts`)
+      .send({
+        templateId: "project-charter",
+        title: "Project Charter",
+        fieldValues: {
+          project_name: "Smoke Project",
+          objective: "Verify export.",
+        },
+      })
+      .expect(201);
+
+    const exportResponse = await agent
+      .get(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/export.md`,
+      )
+      .expect(200);
+
+    if (!exportResponse.text.includes("# Project Charter")) {
+      throw new Error("Expected export to include artifact title.");
+    }
+
+    if (!exportResponse.text.includes("Verify export.")) {
+      throw new Error("Expected export to include saved field values.");
+    }
+
     const templatesResponse = await request(app).get("/api/templates").expect(200);
 
     if (templatesResponse.body.length === 0) {
