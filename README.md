@@ -47,6 +47,22 @@ Open:
 http://localhost:3000
 ```
 
+## Deploy to Render
+
+ArtifactHub can be deployed to Render as a free web service for demo use.
+
+1. Push this repo to GitHub.
+2. In Render, create a new Web Service from the repo.
+3. Render can use the included [`render.yaml`](/Users/pv/bootcamp/projects/artifact-hub/render.yaml) settings automatically.
+4. Deploy with:
+
+```txt
+Build Command: npm install
+Start Command: npm start
+```
+
+Important: the current prototype stores users, sessions, and projects in local JSON files under `data/`. Render free web services use an ephemeral filesystem, so saved data will be lost on restart, redeploy, or idle spin-down. This deployment is suitable for sharing a demo, not for durable production usage.
+
 ## Project Structure
 
 ```txt

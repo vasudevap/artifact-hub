@@ -5,7 +5,7 @@ import fs from "fs/promises";
 import crypto from "crypto";
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Resolve paths for modern ES Modules on macOS
 const __filename = fileURLToPath(import.meta.url);
@@ -488,5 +488,5 @@ app.get("/api/templates/:id", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 ArtifactHub Base running at: http://localhost:3000`);
+  console.log(`ArtifactHub running on port ${PORT}`);
 });
