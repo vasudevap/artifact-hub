@@ -63,6 +63,20 @@ Start Command: npm start
 
 Important: the current prototype stores users, sessions, and projects in local JSON files under `data/`. Render free web services use an ephemeral filesystem, so saved data will be lost on restart, redeploy, or idle spin-down. This deployment is suitable for sharing a demo, not for durable production usage.
 
+## Current Hosted Status
+
+ArtifactHub has been deployed successfully to Render as a live public demo.
+
+This is a major milestone because the product is now reachable on the web and can be tested outside the local development environment. The current deployment should be treated as a demonstration environment, not a production-ready release, because persistence still depends on local JSON files in `data/`.
+
+Current known hosting facts:
+
+- Hosting platform: Render
+- Deployment type: free web service
+- Runtime model: Node.js web server using `npm start`
+- Current persistence risk: local JSON data is ephemeral on Render free instances
+- Next infrastructure milestone: move users, sessions, projects, and artifacts to durable hosted storage
+
 ## Project Structure
 
 ```txt
