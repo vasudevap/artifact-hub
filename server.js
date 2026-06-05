@@ -12,6 +12,7 @@ import {
   deleteProjectByIdAndOwnerId,
   deleteSessionByToken,
   getProjectByIdAndOwnerId,
+  getStorageHealth,
   getUserByEmail,
   getUserBySessionToken,
   initDatabase,
@@ -111,6 +112,21 @@ async function requireAuth(req, res, next) {
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
+app.get("/api/health", async (req, res) => {
+  try {
+    const storage = await getStorageHealth();
+
+    res.json({
+      ok: true,
+      storage,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Health check failed.", error);
+    res.status(500).json({ ok: false, error: "Health check failed." });
+  }
+});
+
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const name = String(req.body.name || "").trim();
@@ -145,6 +161,7 @@ app.post("/api/auth/signup", async (req, res) => {
 
     res.status(201).json({ user: safeUser(user) });
   } catch (error) {
+    console.error("Failed to create account.", error);
     res.status(500).json({ error: "Failed to create account." });
   }
 });
@@ -168,6 +185,7 @@ app.post("/api/auth/login", async (req, res) => {
 
     res.json({ user: safeUser(user) });
   } catch (error) {
+    console.error("Failed to log in.", error);
     res.status(500).json({ error: "Failed to log in." });
   }
 });
@@ -181,6 +199,7 @@ app.post("/api/auth/logout", async (req, res) => {
 
     res.json({ ok: true });
   } catch (error) {
+    console.error("Failed to log out.", error);
     res.status(500).json({ error: "Failed to log out." });
   }
 });
@@ -195,6 +214,7 @@ app.get("/api/auth/me", async (req, res) => {
 
     res.json({ user: safeUser(user) });
   } catch (error) {
+    console.error("Failed to fetch current user.", error);
     res.status(500).json({ error: "Failed to fetch current user." });
   }
 });
@@ -203,6 +223,7 @@ app.get("/api/projects", requireAuth, async (req, res) => {
   try {
     res.json(await listProjectsByOwnerId(req.user.id));
   } catch (error) {
+    console.error("Failed to fetch projects.", error);
     res.status(500).json({ error: "Failed to fetch projects." });
   }
 });
@@ -218,6 +239,7 @@ app.post("/api/projects", requireAuth, async (req, res) => {
 
     res.status(201).json(project);
   } catch (error) {
+    console.error("Failed to create project.", error);
     res.status(500).json({ error: "Failed to create project." });
   }
 });
@@ -235,6 +257,7 @@ app.delete("/api/projects/:projectId", requireAuth, async (req, res) => {
 
     res.json({ ok: true });
   } catch (error) {
+    console.error("Failed to delete project.", error);
     res.status(500).json({ error: "Failed to delete project." });
   }
 });
@@ -252,6 +275,7 @@ app.get("/api/projects/:projectId", requireAuth, async (req, res) => {
 
     res.json(project);
   } catch (error) {
+    console.error("Failed to fetch project.", error);
     res.status(500).json({ error: "Failed to fetch project." });
   }
 });
@@ -276,6 +300,7 @@ app.post(
 
       res.status(201).json(artifact);
     } catch (error) {
+      console.error("Failed to create artifact.", error);
       res.status(500).json({ error: "Failed to create artifact." });
     }
   },
@@ -305,6 +330,7 @@ app.put(
 
       res.json(result.artifact);
     } catch (error) {
+      console.error("Failed to update artifact.", error);
       res.status(500).json({ error: "Failed to update artifact." });
     }
   },
@@ -331,6 +357,7 @@ app.delete(
 
       res.json({ ok: true, project: result.project });
     } catch (error) {
+      console.error("Failed to delete artifact.", error);
       res.status(500).json({ error: "Failed to delete artifact." });
     }
   },
@@ -351,6 +378,7 @@ app.get("/api/templates", async (req, res) => {
     }));
     res.json(summary);
   } catch (error) {
+    console.error("Failed to read template definitions.", error);
     res.status(500).json({ error: "Failed to read template definitions." });
   }
 });
@@ -372,6 +400,7 @@ app.get("/api/templates/:id", async (req, res) => {
     }
     res.json(template);
   } catch (error) {
+    console.error("Failed to fetch template detail.", error);
     res
       .status(500)
       .json({ error: "Failed to fetch template detail structural breakdown." });

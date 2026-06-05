@@ -127,6 +127,22 @@ async function initDatabase() {
   `);
 }
 
+async function getStorageHealth() {
+  if (!USE_DATABASE) {
+    return {
+      type: "json",
+      ok: true,
+    };
+  }
+
+  await pool.query("SELECT 1");
+
+  return {
+    type: "postgres",
+    ok: true,
+  };
+}
+
 async function listProjectsByOwnerId(ownerId) {
   if (!USE_DATABASE) {
     const projects = await readJsonFile(PROJECTS_FILE, []);
@@ -626,6 +642,7 @@ export {
   deleteProjectByIdAndOwnerId,
   deleteSessionByToken,
   getProjectByIdAndOwnerId,
+  getStorageHealth,
   getUserByEmail,
   getUserBySessionToken,
   initDatabase,
