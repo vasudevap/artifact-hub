@@ -25,7 +25,7 @@ ArtifactHub is intended to become an AI-assisted documentation copilot. In later
 - Node.js
 - Express
 - Vanilla HTML, CSS, and JavaScript
-- JSON file storage for the current prototype
+- PostgreSQL-ready persistence layer with JSON file fallback for local/demo continuity
 
 ## Run Locally
 
@@ -61,7 +61,26 @@ Build Command: npm install
 Start Command: npm start
 ```
 
-Important: the current prototype stores users, sessions, and projects in local JSON files under `data/`. Render free web services use an ephemeral filesystem, so saved data will be lost on restart, redeploy, or idle spin-down. This deployment is suitable for sharing a demo, not for durable production usage.
+Important: until the Render Blueprint is synced and `DATABASE_URL` is configured for the hosted service, ArtifactHub stores users, sessions, and projects in local JSON files under `data/`. Render free web services use an ephemeral filesystem, so saved data will be lost on restart, redeploy, or idle spin-down. This deployment is suitable for sharing a demo, not for durable production usage.
+
+## Database Setup
+
+ArtifactHub now supports PostgreSQL when `DATABASE_URL` is present. Without that variable, the app falls back to the existing JSON files in `data/` so local development continues to work without extra setup.
+
+The included [`render.yaml`](/Users/pv/bootcamp/projects/artifact-hub/render.yaml) defines a Render Postgres database and passes its internal connection string to the web service as `DATABASE_URL`.
+
+Recommended rollout for the hosted demo:
+
+1. Commit and push the updated `render.yaml`.
+2. In Render, sync the Blueprint so it creates `artifact-hub-db` and updates the web service environment.
+3. Redeploy the web service so ArtifactHub initializes the database tables on boot.
+4. Run the JSON migration once with the database's external connection string to move existing demo data into PostgreSQL:
+
+```bash
+DATABASE_URL="your-render-postgres-url" npm run migrate:json-to-db
+```
+
+The database schema lives in [`db/schema.sql`](/Users/pv/bootcamp/projects/artifact-hub/db/schema.sql), and the migration script copies users, sessions, projects, and nested artifacts from the current JSON files into PostgreSQL.
 
 ## Current Hosted Status
 

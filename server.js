@@ -3,6 +3,21 @@ import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import crypto from "crypto";
+import {
+  createArtifact,
+  createProject,
+  createSession,
+  createUser,
+  deleteArtifact,
+  deleteProjectByIdAndOwnerId,
+  deleteSessionByToken,
+  getProjectByIdAndOwnerId,
+  getUserByEmail,
+  getUserBySessionToken,
+  initDatabase,
+  listProjectsByOwnerId,
+  updateArtifact,
+} from "./storage.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -10,35 +25,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // Resolve paths for modern ES Modules on macOS
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const TEMPLATES_FILE = path.join(__dirname, "data", "templates.json");
-const USERS_FILE = path.join(__dirname, "data", "users.json");
-const SESSIONS_FILE = path.join(__dirname, "data", "sessions.json");
 const SESSION_COOKIE_NAME = "artifacthub_session";
-const PROJECTS_FILE = path.join(__dirname, "data", "projects.json");
-
-async function readJsonFile(filePath, fallback) {
-  try {
-    const data = await fs.readFile(filePath, "utf-8");
-    return data.trim() ? JSON.parse(data) : fallback;
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return fallback;
-    }
-    throw error;
-  }
-}
-
-async function writeJsonFile(filePath, data) {
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
-}
-
-function createId(prefix) {
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
 
 function normalizeEmail(email) {
   return String(email || "")
@@ -107,18 +94,7 @@ async function getCurrentUser(req) {
     return null;
   }
 
-  const [sessions, users] = await Promise.all([
-    readJsonFile(SESSIONS_FILE, []),
-    readJsonFile(USERS_FILE, []),
-  ]);
-
-  const session = sessions.find((item) => item.token === token);
-
-  if (!session) {
-    return null;
-  }
-
-  return users.find((user) => user.id === session.userId) || null;
+  return getUserBySessionToken(token);
 }
 
 async function requireAuth(req, res, next) {
@@ -148,8 +124,7 @@ app.post("/api/auth/signup", async (req, res) => {
       });
     }
 
-    const users = await readJsonFile(USERS_FILE, []);
-    const existingUser = users.find((user) => user.email === email);
+    const existingUser = await getUserByEmail(email);
 
     if (existingUser) {
       return res
@@ -157,29 +132,15 @@ app.post("/api/auth/signup", async (req, res) => {
         .json({ error: "An account with this email already exists." });
     }
 
-    const timestamp = nowIso();
-    const user = {
-      id: createId("user"),
+    const user = await createUser({
       name,
       email,
       passwordHash: hashPassword(password),
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-
-    users.push(user);
-    await writeJsonFile(USERS_FILE, users);
-
-    const sessions = await readJsonFile(SESSIONS_FILE, []);
-    const session = {
-      id: createId("session"),
+    });
+    const session = await createSession({
       userId: user.id,
       token: crypto.randomBytes(32).toString("hex"),
-      createdAt: timestamp,
-    };
-
-    sessions.push(session);
-    await writeJsonFile(SESSIONS_FILE, sessions);
+    });
     setSessionCookie(res, session.token);
 
     res.status(201).json({ user: safeUser(user) });
@@ -193,23 +154,16 @@ app.post("/api/auth/login", async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
-    const users = await readJsonFile(USERS_FILE, []);
-    const user = users.find((item) => item.email === email);
+    const user = await getUserByEmail(email);
 
     if (!user || !verifyPassword(password, user.passwordHash)) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
-    const sessions = await readJsonFile(SESSIONS_FILE, []);
-    const session = {
-      id: createId("session"),
+    const session = await createSession({
       userId: user.id,
       token: crypto.randomBytes(32).toString("hex"),
-      createdAt: nowIso(),
-    };
-
-    sessions.push(session);
-    await writeJsonFile(SESSIONS_FILE, sessions);
+    });
     setSessionCookie(res, session.token);
 
     res.json({ user: safeUser(user) });
@@ -222,12 +176,7 @@ app.post("/api/auth/logout", async (req, res) => {
   try {
     const cookies = parseCookies(req);
     const token = cookies[SESSION_COOKIE_NAME];
-    const sessions = await readJsonFile(SESSIONS_FILE, []);
-    const remainingSessions = sessions.filter(
-      (session) => session.token !== token,
-    );
-
-    await writeJsonFile(SESSIONS_FILE, remainingSessions);
+    await deleteSessionByToken(token);
     clearSessionCookie(res);
 
     res.json({ ok: true });
@@ -252,12 +201,7 @@ app.get("/api/auth/me", async (req, res) => {
 
 app.get("/api/projects", requireAuth, async (req, res) => {
   try {
-    const projects = await readJsonFile(PROJECTS_FILE, []);
-    const userProjects = projects.filter(
-      (project) => project.ownerId === req.user.id,
-    );
-
-    res.json(userProjects);
+    res.json(await listProjectsByOwnerId(req.user.id));
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch projects." });
   }
@@ -265,23 +209,12 @@ app.get("/api/projects", requireAuth, async (req, res) => {
 
 app.post("/api/projects", requireAuth, async (req, res) => {
   try {
-    const projects = await readJsonFile(PROJECTS_FILE, []);
-    const timestamp = nowIso();
-
-    const project = {
-      id: createId("project"),
+    const project = await createProject({
       ownerId: req.user.id,
       name: String(req.body.name || "Untitled Project").trim(),
       sponsor: String(req.body.sponsor || "").trim(),
       objective: String(req.body.objective || "").trim(),
-      status: "active",
-      artifacts: [],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-
-    projects.unshift(project);
-    await writeJsonFile(PROJECTS_FILE, projects);
+    });
 
     res.status(201).json(project);
   } catch (error) {
@@ -291,21 +224,14 @@ app.post("/api/projects", requireAuth, async (req, res) => {
 
 app.delete("/api/projects/:projectId", requireAuth, async (req, res) => {
   try {
-    const projects = await readJsonFile(PROJECTS_FILE, []);
-    const project = projects.find(
-      (item) =>
-        item.id === req.params.projectId && item.ownerId === req.user.id,
+    const deleted = await deleteProjectByIdAndOwnerId(
+      req.params.projectId,
+      req.user.id,
     );
 
-    if (!project) {
+    if (!deleted) {
       return res.status(404).json({ error: "Project not found." });
     }
-
-    const remainingProjects = projects.filter(
-      (item) => item.id !== req.params.projectId,
-    );
-
-    await writeJsonFile(PROJECTS_FILE, remainingProjects);
 
     res.json({ ok: true });
   } catch (error) {
@@ -315,10 +241,9 @@ app.delete("/api/projects/:projectId", requireAuth, async (req, res) => {
 
 app.get("/api/projects/:projectId", requireAuth, async (req, res) => {
   try {
-    const projects = await readJsonFile(PROJECTS_FILE, []);
-    const project = projects.find(
-      (item) =>
-        item.id === req.params.projectId && item.ownerId === req.user.id,
+    const project = await getProjectByIdAndOwnerId(
+      req.params.projectId,
+      req.user.id,
     );
 
     if (!project) {
@@ -337,31 +262,17 @@ app.post(
   requireAuth,
   async (req, res) => {
     try {
-      const projects = await readJsonFile(PROJECTS_FILE, []);
-      const project = projects.find(
-        (item) =>
-          item.id === req.params.projectId && item.ownerId === req.user.id,
-      );
-
-      if (!project) {
-        return res.status(404).json({ error: "Project not found." });
-      }
-
-      const timestamp = nowIso();
-      const artifact = {
-        id: createId("artifact"),
+      const artifact = await createArtifact({
+        projectId: req.params.projectId,
+        ownerId: req.user.id,
         templateId: String(req.body.templateId || "").trim(),
         title: String(req.body.title || "Untitled Artifact").trim(),
-        status: "draft",
         fieldValues: req.body.fieldValues || {},
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      };
+      });
 
-      project.artifacts.unshift(artifact);
-      project.updatedAt = timestamp;
-
-      await writeJsonFile(PROJECTS_FILE, projects);
+      if (!artifact) {
+        return res.status(404).json({ error: "Project not found." });
+      }
 
       res.status(201).json(artifact);
     } catch (error) {
@@ -375,33 +286,24 @@ app.put(
   requireAuth,
   async (req, res) => {
     try {
-      const projects = await readJsonFile(PROJECTS_FILE, []);
-      const project = projects.find(
-        (item) =>
-          item.id === req.params.projectId && item.ownerId === req.user.id,
-      );
+      const result = await updateArtifact({
+        projectId: req.params.projectId,
+        artifactId: req.params.artifactId,
+        ownerId: req.user.id,
+        title: String(req.body.title || "Untitled Artifact").trim(),
+        status: String(req.body.status || "draft").trim(),
+        fieldValues: req.body.fieldValues || {},
+      });
 
-      if (!project) {
+      if (!result.projectFound) {
         return res.status(404).json({ error: "Project not found." });
       }
 
-      const artifact = project.artifacts.find(
-        (item) => item.id === req.params.artifactId,
-      );
-
-      if (!artifact) {
+      if (!result.artifact) {
         return res.status(404).json({ error: "Artifact not found." });
       }
 
-      artifact.title = String(req.body.title || artifact.title).trim();
-      artifact.status = String(req.body.status || artifact.status).trim();
-      artifact.fieldValues = req.body.fieldValues || artifact.fieldValues;
-      artifact.updatedAt = nowIso();
-      project.updatedAt = artifact.updatedAt;
-
-      await writeJsonFile(PROJECTS_FILE, projects);
-
-      res.json(artifact);
+      res.json(result.artifact);
     } catch (error) {
       res.status(500).json({ error: "Failed to update artifact." });
     }
@@ -413,32 +315,21 @@ app.delete(
   requireAuth,
   async (req, res) => {
     try {
-      const projects = await readJsonFile(PROJECTS_FILE, []);
-      const project = projects.find(
-        (item) =>
-          item.id === req.params.projectId && item.ownerId === req.user.id,
-      );
+      const result = await deleteArtifact({
+        projectId: req.params.projectId,
+        artifactId: req.params.artifactId,
+        ownerId: req.user.id,
+      });
 
-      if (!project) {
+      if (!result.projectFound) {
         return res.status(404).json({ error: "Project not found." });
       }
 
-      const artifactExists = project.artifacts.some(
-        (item) => item.id === req.params.artifactId,
-      );
-
-      if (!artifactExists) {
+      if (!result.deleted) {
         return res.status(404).json({ error: "Artifact not found." });
       }
 
-      project.artifacts = project.artifacts.filter(
-        (item) => item.id !== req.params.artifactId,
-      );
-      project.updatedAt = nowIso();
-
-      await writeJsonFile(PROJECTS_FILE, projects);
-
-      res.json({ ok: true, project });
+      res.json({ ok: true, project: result.project });
     } catch (error) {
       res.status(500).json({ error: "Failed to delete artifact." });
     }
@@ -487,6 +378,13 @@ app.get("/api/templates/:id", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`ArtifactHub running on port ${PORT}`);
-});
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`ArtifactHub running on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to initialize persistence layer.", error);
+    process.exit(1);
+  });
