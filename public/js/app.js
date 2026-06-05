@@ -141,7 +141,6 @@ document.addEventListener("DOMContentLoaded", () => {
       projectList.innerHTML = '<li class="loading">No projects yet.</li>';
       projectSummaryGrid.innerHTML =
         '<p class="empty-state">Create your first project workspace to begin.</p>';
-      showDashboard();
       return;
     }
 
