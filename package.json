@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "migrate:json-to-db": "node scripts/migrate-json-to-postgres.js",
-    "test": "echo \"No automated tests configured\"",
+    "smoke": "node scripts/smoke-test.js",
+    "test": "npm run smoke",
     "start": "node server.js"
   },
   "keywords": [],
@@ -15,5 +16,8 @@
   "dependencies": {
     "express": "^5.2.1",
     "pg": "^8.21.0"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2"
   }
 }

@@ -362,6 +362,19 @@ textarea.form-control {
     font-size: 14px;
 }
 
+.status-message[data-tone="success"] {
+    color: #166534;
+}
+
+.status-message[data-tone="warning"],
+.status-message[data-tone="working"] {
+    color: #92400e;
+}
+
+.status-message[data-tone="error"] {
+    color: #b91c1c;
+}
+
 .project-form-panel {
     background-color: var(--bg-card);
     border: 1px solid var(--border);

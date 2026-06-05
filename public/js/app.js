@@ -19,6 +19,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const projectName = document.getElementById("project-name");
   const projectSponsor = document.getElementById("project-sponsor");
   const projectObjective = document.getElementById("project-objective");
+  const projectMessage = document.getElementById("project-message");
   const dashboardView = document.getElementById("dashboard-view");
   const projectSummaryGrid = document.getElementById("project-summary-grid");
   const projectWorkspaceView = document.getElementById(
@@ -120,17 +121,33 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await response.json();
 
       if (!response.ok) {
-        projectList.innerHTML =
-          '<li class="loading">Unable to load projects.</li>';
+        const message =
+          data.error ||
+          "Projects could not be loaded. Refresh the page or try signing in again.";
+        renderProjectLoadError(message);
         return;
       }
 
       projects = data;
       renderProjects();
     } catch (error) {
-      projectList.innerHTML =
-        '<li class="loading">Unable to load projects.</li>';
+      const message =
+        "Projects could not be loaded because the server is unreachable. Check your connection and refresh.";
+      renderProjectLoadError(message);
     }
+  }
+
+  function renderProjectLoadError(message) {
+    const listItem = document.createElement("li");
+    listItem.className = "loading";
+    listItem.textContent = message;
+
+    const summary = document.createElement("p");
+    summary.className = "empty-state";
+    summary.textContent = message;
+
+    projectList.replaceChildren(listItem);
+    projectSummaryGrid.replaceChildren(summary);
   }
 
   function renderProjects() {
@@ -278,6 +295,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function showProjectForm() {
     showDashboard();
+    setProjectMessage("");
     projectForm.classList.remove("hidden");
     projectName.focus();
   }
@@ -386,7 +404,10 @@ document.addEventListener("DOMContentLoaded", () => {
       activeContainer.classList.remove("hidden");
 
       renderTemplateFields(activeTemplate, artifact.fieldValues || {});
-      setArtifactSaveStatus(`Saved ${formatDateTime(artifact.updatedAt)}`);
+      setArtifactSaveStatus(
+        `Last saved ${formatDateTime(artifact.updatedAt)}. Your changes are stored.`,
+        "success",
+      );
       renderProjects();
       renderArtifactSummary(activeProject);
     } catch (error) {
@@ -443,7 +464,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     hasUnsavedChanges = true;
-    setArtifactSaveStatus("Unsaved changes");
+    setArtifactSaveStatus("Unsaved changes", "warning");
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveActiveArtifact, 500);
   }
@@ -469,7 +490,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     isSavingArtifact = true;
     pendingSave = false;
-    setArtifactSaveStatus("Saving...");
+    setArtifactSaveStatus("Saving...", "working");
 
     try {
       let response;
@@ -527,10 +548,16 @@ document.addEventListener("DOMContentLoaded", () => {
       renderProjects();
       renderArtifactSummary(activeProject);
       hasUnsavedChanges = false;
-      setArtifactSaveStatus(`Saved ${formatDateTime(activeArtifact.updatedAt)}`);
+      setArtifactSaveStatus(
+        `Last saved ${formatDateTime(activeArtifact.updatedAt)}. Your changes are stored.`,
+        "success",
+      );
     } catch (error) {
       hasUnsavedChanges = true;
-      setArtifactSaveStatus("Unable to save changes.");
+      setArtifactSaveStatus(
+        "Unable to save changes. Your latest edits are still on screen.",
+        "error",
+      );
     } finally {
       isSavingArtifact = false;
       if (pendingSave) {
@@ -553,8 +580,14 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   }
 
-  function setArtifactSaveStatus(message) {
+  function setArtifactSaveStatus(message, tone = "") {
     artifactSaveStatus.textContent = message;
+    artifactSaveStatus.dataset.tone = tone;
+  }
+
+  function setProjectMessage(message, tone = "") {
+    projectMessage.textContent = message;
+    projectMessage.dataset.tone = tone;
   }
 
   function getTemplatePreviewStatus() {
@@ -697,6 +730,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   projectForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    setProjectMessage("Creating project...", "working");
 
     try {
       const response = await fetch("/api/projects", {
@@ -714,17 +748,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const project = await response.json();
 
       if (!response.ok) {
-        alert(project.error || "Unable to create project.");
+        setProjectMessage(
+          project.error ||
+            "Project could not be created. Check the fields and try again.",
+          "error",
+        );
         return;
       }
 
       projectForm.reset();
+      setProjectMessage("Project created.", "success");
       projectForm.classList.add("hidden");
       projects.unshift(project);
       renderProjects();
       selectProject(project.id);
     } catch (error) {
-      alert("Unable to create project.");
+      setProjectMessage(
+        "Project could not be created because the server is unreachable. Try again in a moment.",
+        "error",
+      );
     }
   });
 

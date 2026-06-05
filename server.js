@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import { pathToFileURL } from "url";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import crypto from "crypto";
@@ -407,13 +408,20 @@ app.get("/api/templates/:id", async (req, res) => {
   }
 });
 
-initDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`ArtifactHub running on port ${PORT}`);
-    });
-  })
+async function startServer(port = PORT) {
+  await initDatabase();
+
+  return app.listen(port, () => {
+    console.log(`ArtifactHub running on port ${port}`);
+  });
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServer()
   .catch((error) => {
     console.error("Failed to initialize persistence layer.", error);
     process.exit(1);
   });
+}
+
+export { app, startServer };

@@ -9,9 +9,10 @@ const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const USERS_FILE = path.join(__dirname, "data", "users.json");
-const SESSIONS_FILE = path.join(__dirname, "data", "sessions.json");
-const PROJECTS_FILE = path.join(__dirname, "data", "projects.json");
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
+const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const USE_DATABASE = Boolean(DATABASE_URL);
@@ -652,6 +653,7 @@ export {
   pool,
   readJsonFile,
   updateArtifact,
+  DATA_DIR,
   USERS_FILE,
   SESSIONS_FILE,
   PROJECTS_FILE,

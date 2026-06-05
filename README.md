@@ -41,6 +41,12 @@ Start the app:
 npm start
 ```
 
+Run the local smoke test:
+
+```bash
+npm test
+```
+
 Open:
 
 ```txt
