@@ -1,29 +1,167 @@
 {
-  "project-charter": {
-    "title": "Project Charter (PM - Initiation)",
-    "description": "Establishes formal authorization for a new project and outlines objectives.",
+  "business-case": {
+    "title": "Business Case (PMO/BA - Pre-Initiation)",
+    "description": "Justifies why the project should exist by defining the problem, expected value, options, costs, risks, and success measures.",
     "fields": [
-      {"id": "project_name", "label": "Project Name", "type": "text", "placeholder": "e.g., E-Commerce Checkout Optimization"},
-      {"id": "objective", "label": "Project Objective", "type": "textarea", "placeholder": "What business problem does this solve?"},
-      {"id": "scope", "label": "High-Level Scope", "type": "textarea", "placeholder": "Inclusions and exclusions..."},
-      {"id": "sponsor", "label": "Project Sponsor", "type": "text", "placeholder": "Executive stakeholder name"}
+      {"id": "initiative_name", "label": "Initiative Name", "type": "text", "placeholder": "e.g., Customer Onboarding Modernization"},
+      {"id": "business_problem", "label": "Business Problem or Opportunity", "type": "textarea", "placeholder": "What is happening today that requires investment?"},
+      {"id": "expected_value", "label": "Expected Benefits and Value", "type": "textarea", "placeholder": "What value, outcomes, or benefits are expected?"},
+      {"id": "options_considered", "label": "Options Considered", "type": "textarea", "placeholder": "List the main options, including doing nothing."},
+      {"id": "investment_summary", "label": "Cost and Investment Summary", "type": "textarea", "placeholder": "Estimate cost, timing, funding, and major constraints."}
     ]
   },
-  "brd": {
-    "title": "Business Requirements Document (BA - Elicitation)",
-    "description": "Deep dive into business needs, user profiles, and operational parameters.",
+  "project-charter": {
+    "title": "Project Charter (PM - Initiation)",
+    "description": "Formally authorizes the project and establishes its purpose, scope boundaries, leadership, and high-level success conditions.",
     "fields": [
-      {"id": "brd_title", "label": "Document Title", "type": "text", "placeholder": "e.g., BRD - Automated Inventory System"},
-      {"id": "user_personas", "label": "Target User Personas", "type": "textarea", "placeholder": "Who will use this system?"},
-      {"id": "functional_reqs", "label": "Core Functional Requirements", "type": "textarea", "placeholder": "The system MUST allow users to..."}
+      {"id": "project_name", "label": "Project Name", "type": "text", "placeholder": "e.g., E-Commerce Checkout Optimization"},
+      {"id": "objective", "label": "Project Objective", "type": "textarea", "placeholder": "What business outcome will this project achieve?"},
+      {"id": "high_level_scope", "label": "High-Level Scope", "type": "textarea", "placeholder": "Summarize what is in and out of scope."},
+      {"id": "sponsor", "label": "Project Sponsor", "type": "text", "placeholder": "Executive sponsor name"},
+      {"id": "success_criteria", "label": "Success Criteria", "type": "textarea", "placeholder": "How will the project be judged successful?"}
+    ]
+  },
+  "stakeholder-register": {
+    "title": "Stakeholder Register and Engagement Plan (PM/BA - Initiation)",
+    "description": "Identifies stakeholders, their interests, influence, impacts, and the approach for engaging them throughout the project.",
+    "fields": [
+      {"id": "stakeholder_groups", "label": "Stakeholder Groups", "type": "textarea", "placeholder": "List key stakeholder groups, roles, and representatives."},
+      {"id": "needs_and_concerns", "label": "Needs, Concerns, and Expectations", "type": "textarea", "placeholder": "What matters most to each major stakeholder group?"},
+      {"id": "influence_and_impact", "label": "Influence and Impact Assessment", "type": "textarea", "placeholder": "Who has high influence, high impact, or decision authority?"},
+      {"id": "engagement_strategy", "label": "Engagement Strategy", "type": "textarea", "placeholder": "How will the team engage, align, and escalate with stakeholders?"},
+      {"id": "cadence", "label": "Communication and Review Cadence", "type": "textarea", "placeholder": "Describe touchpoints, reporting rhythm, and forums."}
+    ]
+  },
+  "integrated-project-plan": {
+    "title": "Integrated Project Plan (PMO - Planning)",
+    "description": "Provides the working plan for delivery, including approach, milestones, governance, controls, and execution rhythms.",
+    "fields": [
+      {"id": "delivery_approach", "label": "Delivery Approach", "type": "textarea", "placeholder": "Describe the lifecycle, work model, and major phases."},
+      {"id": "major_milestones", "label": "Major Milestones", "type": "textarea", "placeholder": "List major milestones, stage gates, and target dates."},
+      {"id": "governance_model", "label": "Governance Model", "type": "textarea", "placeholder": "Define meetings, approvals, decision rights, and escalation paths."},
+      {"id": "controls_and_baselines", "label": "Controls and Baselines", "type": "textarea", "placeholder": "Summarize scope, schedule, cost, quality, and reporting controls."},
+      {"id": "delivery_team", "label": "Delivery Team and Roles", "type": "textarea", "placeholder": "Who is accountable, responsible, consulted, and informed?"}
+    ]
+  },
+  "scope-statement": {
+    "title": "Scope Statement and Deliverables Baseline (PM/BA - Planning)",
+    "description": "Defines the detailed project and product scope, key deliverables, acceptance criteria, assumptions, constraints, and exclusions.",
+    "fields": [
+      {"id": "product_scope", "label": "Product or Service Scope", "type": "textarea", "placeholder": "Describe the product, service, or capability being delivered."},
+      {"id": "project_deliverables", "label": "Major Deliverables", "type": "textarea", "placeholder": "List the major outputs the project must produce."},
+      {"id": "acceptance_criteria", "label": "Acceptance Criteria", "type": "textarea", "placeholder": "What conditions must be met for acceptance?"},
+      {"id": "assumptions_constraints", "label": "Assumptions and Constraints", "type": "textarea", "placeholder": "Document key planning assumptions and constraints."},
+      {"id": "exclusions", "label": "Explicit Exclusions", "type": "textarea", "placeholder": "State what is out of scope to reduce ambiguity."}
+    ]
+  },
+  "requirements-package": {
+    "title": "Requirements Package / BRD (BA - Elicitation and Analysis)",
+    "description": "Captures business, stakeholder, functional, and non-functional requirements in a structured package that can drive solution definition and delivery.",
+    "fields": [
+      {"id": "business_requirements", "label": "Business Requirements", "type": "textarea", "placeholder": "What business outcomes, capabilities, or rules are required?"},
+      {"id": "stakeholder_requirements", "label": "Stakeholder and User Requirements", "type": "textarea", "placeholder": "What do users, operators, and stakeholders need?"},
+      {"id": "functional_requirements", "label": "Functional Requirements", "type": "textarea", "placeholder": "What must the solution do?"},
+      {"id": "non_functional_requirements", "label": "Non-Functional Requirements", "type": "textarea", "placeholder": "Document security, performance, reliability, audit, and compliance needs."},
+      {"id": "business_rules", "label": "Business Rules and Constraints", "type": "textarea", "placeholder": "List governing rules, policies, and required constraints."}
+    ]
+  },
+  "requirements-traceability": {
+    "title": "Requirements Traceability Matrix (BA/PM - Control)",
+    "description": "Connects requirements to objectives, design elements, delivery items, test coverage, decisions, and status so scope can be managed end to end.",
+    "fields": [
+      {"id": "traceability_approach", "label": "Traceability Approach", "type": "textarea", "placeholder": "How will requirements be linked across the lifecycle?"},
+      {"id": "requirement_sources", "label": "Requirement Sources", "type": "textarea", "placeholder": "Where do requirements originate and who owns them?"},
+      {"id": "mapping_rules", "label": "Mapping Rules", "type": "textarea", "placeholder": "How will requirements map to design, build, and test artifacts?"},
+      {"id": "change_handling", "label": "Change and Version Handling", "type": "textarea", "placeholder": "How will traceability be maintained when requirements change?"},
+      {"id": "coverage_gaps", "label": "Coverage Gaps and Risks", "type": "textarea", "placeholder": "What gaps, orphaned requirements, or coverage risks exist?"}
     ]
   },
   "raid-log": {
-    "title": "RAID Log Matrix (PM - Monitoring)",
-    "description": "Tracks Risks, Assumptions, Issues, and Dependencies throughout delivery.",
+    "title": "RAID Log (PM - Delivery Control)",
+    "description": "Tracks risks, assumptions, issues, and dependencies that require active monitoring and action during execution.",
     "fields": [
-      {"id": "risk_desc", "label": "Risk Description", "type": "textarea", "placeholder": "Describe a potential risk event..."},
-      {"id": "mitigation", "label": "Mitigation Strategy", "type": "textarea", "placeholder": "How will you reduce or prevent this risk?"}
+      {"id": "risks", "label": "Key Risks", "type": "textarea", "placeholder": "List the top risks with owners and response strategies."},
+      {"id": "assumptions", "label": "Critical Assumptions", "type": "textarea", "placeholder": "Document assumptions that could affect delivery if invalid."},
+      {"id": "issues", "label": "Open Issues", "type": "textarea", "placeholder": "What issues need resolution, by whom, and by when?"},
+      {"id": "dependencies", "label": "Dependencies", "type": "textarea", "placeholder": "What external or internal dependencies could affect delivery?"},
+      {"id": "next_actions", "label": "Immediate Actions", "type": "textarea", "placeholder": "What actions must be taken next and who owns them?"}
+    ]
+  },
+  "change-decision-log": {
+    "title": "Change and Decision Log (PMO - Governance)",
+    "description": "Maintains the record of approved and pending changes, key decisions, rationale, impacts, and follow-through actions.",
+    "fields": [
+      {"id": "change_requests", "label": "Change Requests", "type": "textarea", "placeholder": "Describe requested changes, impacts, and current status."},
+      {"id": "decision_register", "label": "Decision Register", "type": "textarea", "placeholder": "Capture decisions, dates, approvers, and rationale."},
+      {"id": "impact_assessment", "label": "Impact Assessment", "type": "textarea", "placeholder": "Summarize impact to scope, timeline, cost, quality, and risk."},
+      {"id": "approval_path", "label": "Approval Path", "type": "textarea", "placeholder": "Who approves what, and under what thresholds?"},
+      {"id": "follow_up_actions", "label": "Follow-Up Actions", "type": "textarea", "placeholder": "What implementation actions were created by each decision?"}
+    ]
+  },
+  "architecture-vision": {
+    "title": "Architecture Vision (Architecture - Initiation)",
+    "description": "Defines the target architectural intent, stakeholder concerns, scope, principles, and the high-level end state the project aims to achieve.",
+    "fields": [
+      {"id": "architecture_problem", "label": "Architecture Problem or Driver", "type": "textarea", "placeholder": "What strategic, business, or technical driver is shaping the architecture effort?"},
+      {"id": "stakeholder_concerns", "label": "Stakeholder Concerns", "type": "textarea", "placeholder": "What concerns must the architecture address for sponsors, users, and operators?"},
+      {"id": "target_state_summary", "label": "Target State Summary", "type": "textarea", "placeholder": "Describe the high-level future architecture and expected outcomes."},
+      {"id": "principles_and_constraints", "label": "Principles and Constraints", "type": "textarea", "placeholder": "What architecture principles, standards, and constraints apply?"},
+      {"id": "scope_boundaries", "label": "Scope Boundaries", "type": "textarea", "placeholder": "What domains, systems, and teams are in or out of scope?"}
+    ]
+  },
+  "architecture-requirements": {
+    "title": "Architecture Requirements Specification (Architecture/BA - Planning)",
+    "description": "Consolidates architecture-significant requirements, constraints, assumptions, and quality attributes that the solution design must satisfy.",
+    "fields": [
+      {"id": "quality_attributes", "label": "Quality Attributes", "type": "textarea", "placeholder": "Document availability, resilience, performance, supportability, and similar qualities."},
+      {"id": "security_and_compliance", "label": "Security and Compliance Requirements", "type": "textarea", "placeholder": "Capture security, privacy, audit, and regulatory requirements."},
+      {"id": "integration_and_data_constraints", "label": "Integration and Data Constraints", "type": "textarea", "placeholder": "What interfaces, data rules, and interoperability constraints exist?"},
+      {"id": "technical_constraints", "label": "Technical Constraints and Standards", "type": "textarea", "placeholder": "List standards, platforms, reuse expectations, and prohibitions."},
+      {"id": "architecture_risks", "label": "Architecture Risks and Trade-Offs", "type": "textarea", "placeholder": "What key design tensions or architecture risks need explicit attention?"}
+    ]
+  },
+  "solution-architecture": {
+    "title": "Solution Architecture Definition (Architecture - Design)",
+    "description": "Documents the end-to-end solution structure across business, application, data, integration, and technology viewpoints.",
+    "fields": [
+      {"id": "solution_context", "label": "Solution Context", "type": "textarea", "placeholder": "Describe the solution context, actors, systems, and boundaries."},
+      {"id": "logical_design", "label": "Logical Design Overview", "type": "textarea", "placeholder": "Summarize key components, services, data flows, and responsibilities."},
+      {"id": "deployment_view", "label": "Deployment and Environment View", "type": "textarea", "placeholder": "How will the solution be deployed across environments and platforms?"},
+      {"id": "integration_view", "label": "Integration and Information View", "type": "textarea", "placeholder": "Describe interfaces, data entities, events, and integration patterns."},
+      {"id": "design_decisions", "label": "Key Design Decisions", "type": "textarea", "placeholder": "Record major design decisions, rationale, and open architecture actions."}
+    ]
+  },
+  "transition-migration-plan": {
+    "title": "Transition and Migration Plan (PM/Architecture - Delivery)",
+    "description": "Defines how the target solution will be implemented, released, adopted, and transitioned into operations with manageable risk.",
+    "fields": [
+      {"id": "release_strategy", "label": "Release Strategy", "type": "textarea", "placeholder": "Describe rollout waves, cutover approach, and sequencing."},
+      {"id": "migration_dependencies", "label": "Migration Dependencies", "type": "textarea", "placeholder": "What dependencies, prerequisites, and readiness criteria exist?"},
+      {"id": "operational_readiness", "label": "Operational Readiness", "type": "textarea", "placeholder": "What support, training, monitoring, and handover activities are required?"},
+      {"id": "rollback_and_contingency", "label": "Rollback and Contingency", "type": "textarea", "placeholder": "How will rollback, fallback, and contingency be handled?"},
+      {"id": "adoption_plan", "label": "Adoption and Change Plan", "type": "textarea", "placeholder": "How will affected users and teams adopt the new solution?"}
+    ]
+  },
+  "test-acceptance-plan": {
+    "title": "Test and Acceptance Plan (BA/QA/PM - Validation)",
+    "description": "Defines how the team will verify requirements, validate business outcomes, and secure formal stakeholder acceptance.",
+    "fields": [
+      {"id": "test_scope", "label": "Test Scope", "type": "textarea", "placeholder": "What will be tested and what will not?"},
+      {"id": "test_coverage", "label": "Requirements Coverage", "type": "textarea", "placeholder": "How will business and solution requirements be covered by testing?"},
+      {"id": "entry_exit_criteria", "label": "Entry and Exit Criteria", "type": "textarea", "placeholder": "What conditions govern the start and completion of test phases?"},
+      {"id": "acceptance_approach", "label": "Acceptance Approach", "type": "textarea", "placeholder": "How will UAT, business sign-off, and defect thresholds be handled?"},
+      {"id": "roles_and_schedule", "label": "Roles, Environments, and Schedule", "type": "textarea", "placeholder": "Who participates, where will testing occur, and when?"}
+    ]
+  },
+  "closure-lessons-learned": {
+    "title": "Closure Report and Lessons Learned (PMO - Closeout)",
+    "description": "Summarizes delivery outcomes, acceptance, benefits outlook, unresolved items, and lessons to carry into future work.",
+    "fields": [
+      {"id": "delivery_summary", "label": "Delivery Summary", "type": "textarea", "placeholder": "What was delivered and what remains open or deferred?"},
+      {"id": "acceptance_and_handover", "label": "Acceptance and Handover", "type": "textarea", "placeholder": "Document approvals, handover status, and operational ownership."},
+      {"id": "benefits_outlook", "label": "Benefits and Outcome Outlook", "type": "textarea", "placeholder": "What benefits are expected now, and how will they be monitored?"},
+      {"id": "lessons_learned", "label": "Lessons Learned", "type": "textarea", "placeholder": "What should future teams repeat, change, or avoid?"},
+      {"id": "follow_on_actions", "label": "Follow-On Actions", "type": "textarea", "placeholder": "List any post-project actions, owners, and target dates."}
     ]
   }
 }

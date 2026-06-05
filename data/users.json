@@ -1,0 +1,18 @@
+[
+  {
+    "id": "user_1780522698830_wpn4xz",
+    "name": "Demo User",
+    "email": "demo@example.com",
+    "passwordHash": "80e914a98f9c7e8020ac3f2757f3cac1:22f24105ca7fd7225e0ed0ea4bb843660d20f637df1d6d6d1dd4688353f5c79fccaff1ace9c1490320bf491109039b80c799bb46a977ba3dd4125159bebb1aa0",
+    "createdAt": "2026-06-03T21:38:18.830Z",
+    "updatedAt": "2026-06-03T21:38:18.830Z"
+  },
+  {
+    "id": "user_1780623060466_jxfidx",
+    "name": "james dean",
+    "email": "james@dean.com",
+    "passwordHash": "25591d245cd4b64c48529bfa20a1a4e5:3c66e4388180a9b2e2188f3ed08b94589e861ca9d511f3e0f0d07c125b7d477217ddae48d9f84e3b03f9c4ef86ed55319e3a39a98cdb195878a7f1890b089d64",
+    "createdAt": "2026-06-05T01:31:00.466Z",
+    "updatedAt": "2026-06-05T01:31:00.466Z"
+  }
+]
