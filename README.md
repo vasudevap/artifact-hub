@@ -7,6 +7,7 @@ The current app is a Phase 1 foundation. It supports account-based access, priva
 ## What It Does Today
 
 - Lets users sign up, log in, and log out
+- Lets users request a demo password reset link and set a new password
 - Keeps project data private to the signed-in user
 - Lets users create and delete projects
 - Displays projects and saved artifacts as a sidebar tree

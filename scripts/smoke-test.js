@@ -10,6 +10,7 @@ async function run() {
     writeFile(path.join(dataDir, "users.json"), "[]"),
     writeFile(path.join(dataDir, "sessions.json"), "[]"),
     writeFile(path.join(dataDir, "projects.json"), "[]"),
+    writeFile(path.join(dataDir, "password-resets.json"), "[]"),
   ]);
 
   process.env.DATA_DIR = dataDir;
@@ -30,6 +31,47 @@ async function run() {
         password: "password123",
       })
       .expect(201);
+
+    const resetRequest = await request(app)
+      .post("/api/auth/password-reset/request")
+      .send({ email })
+      .expect(200);
+
+    if (!resetRequest.body.resetUrl) {
+      throw new Error("Expected password reset request to return a demo reset URL.");
+    }
+
+    const resetToken = new URL(resetRequest.body.resetUrl).searchParams.get(
+      "resetToken",
+    );
+
+    if (!resetToken) {
+      throw new Error("Expected demo reset URL to include a reset token.");
+    }
+
+    await request(app)
+      .post("/api/auth/password-reset/confirm")
+      .send({
+        token: resetToken,
+        password: "new-password123",
+      })
+      .expect(200);
+
+    await request(app)
+      .post("/api/auth/login")
+      .send({
+        email,
+        password: "password123",
+      })
+      .expect(401);
+
+    await agent
+      .post("/api/auth/login")
+      .send({
+        email,
+        password: "new-password123",
+      })
+      .expect(200);
 
     await agent.get("/api/projects").expect(200, []);
 

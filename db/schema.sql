@@ -14,6 +14,15 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at TIMESTAMPTZ NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS password_resets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY,
   owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -37,5 +46,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_resets_token_hash ON password_resets(token_hash);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_project_id ON artifacts(project_id);

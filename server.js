@@ -6,6 +6,7 @@ import fs from "fs/promises";
 import crypto from "crypto";
 import {
   createArtifact,
+  createPasswordReset,
   createProject,
   createSession,
   createUser,
@@ -18,6 +19,7 @@ import {
   getUserBySessionToken,
   initDatabase,
   listProjectsByOwnerId,
+  resetPasswordWithToken,
   updateArtifact,
 } from "./storage.js";
 
@@ -137,6 +139,17 @@ function renderArtifactMarkdown({ artifact, project, template }) {
   return `${lines.join("\n").trim()}\n`;
 }
 
+function getBaseUrl(req) {
+  if (process.env.PUBLIC_URL) {
+    return process.env.PUBLIC_URL.replace(/\/$/, "");
+  }
+
+  const protocol = String(req.get("x-forwarded-proto") || req.protocol || "http")
+    .split(",")[0]
+    .trim();
+  return `${protocol}://${req.get("host")}`;
+}
+
 async function getCurrentUser(req) {
   const cookies = parseCookies(req);
   const token = cookies[SESSION_COOKIE_NAME];
@@ -237,6 +250,69 @@ app.post("/api/auth/login", async (req, res) => {
   } catch (error) {
     console.error("Failed to log in.", error);
     res.status(500).json({ error: "Failed to log in." });
+  }
+});
+
+app.post("/api/auth/password-reset/request", async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body.email);
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const reset = await createPasswordReset({ email, expiresAt });
+    const response = {
+      message:
+        "If an account exists for that email, a password reset link has been created.",
+    };
+
+    if (reset) {
+      const resetUrl = `${getBaseUrl(req)}/?resetToken=${encodeURIComponent(
+        reset.token,
+      )}`;
+      response.resetUrl = resetUrl;
+      response.expiresAt = reset.expiresAt;
+      if (process.env.NODE_ENV !== "test") {
+        console.log(`Password reset link for ${email}: ${resetUrl}`);
+      }
+    }
+
+    res.json(response);
+  } catch (error) {
+    console.error("Failed to request password reset.", error);
+    res.status(500).json({ error: "Failed to request password reset." });
+  }
+});
+
+app.post("/api/auth/password-reset/confirm", async (req, res) => {
+  try {
+    const token = String(req.body.token || "").trim();
+    const password = String(req.body.password || "");
+
+    if (!token || password.length < 8) {
+      return res.status(400).json({
+        error: "A valid reset token and password of at least 8 characters are required.",
+      });
+    }
+
+    const reset = await resetPasswordWithToken({
+      token,
+      passwordHash: hashPassword(password),
+    });
+
+    if (!reset) {
+      return res
+        .status(400)
+        .json({ error: "This reset link is invalid or has expired." });
+    }
+
+    clearSessionCookie(res);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to reset password.", error);
+    res.status(500).json({ error: "Failed to reset password." });
   }
 });
 

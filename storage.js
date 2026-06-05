@@ -13,6 +13,7 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
+const PASSWORD_RESETS_FILE = path.join(DATA_DIR, "password-resets.json");
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const USE_DATABASE = Boolean(DATABASE_URL);
@@ -78,6 +79,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 async function initDatabase() {
   if (!USE_DATABASE) {
     return;
@@ -97,6 +102,15 @@ async function initDatabase() {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       token TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL
     );
 
@@ -123,6 +137,8 @@ async function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_token_hash ON password_resets(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
     CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
     CREATE INDEX IF NOT EXISTS idx_artifacts_project_id ON artifacts(project_id);
   `);
@@ -618,6 +634,141 @@ async function createSession({ userId, token }) {
   return session;
 }
 
+async function createPasswordReset({ email, expiresAt }) {
+  const user = await getUserByEmail(email);
+
+  if (!user) {
+    return null;
+  }
+
+  const reset = {
+    id: createId("reset"),
+    userId: user.id,
+    token: crypto.randomBytes(32).toString("hex"),
+    expiresAt,
+    usedAt: null,
+    createdAt: nowIso(),
+  };
+  const tokenHash = hashToken(reset.token);
+
+  if (!USE_DATABASE) {
+    const resets = await readJsonFile(PASSWORD_RESETS_FILE, []);
+    resets.push({
+      id: reset.id,
+      userId: reset.userId,
+      tokenHash,
+      expiresAt: reset.expiresAt,
+      usedAt: reset.usedAt,
+      createdAt: reset.createdAt,
+    });
+    await writeJsonFile(PASSWORD_RESETS_FILE, resets);
+    return reset;
+  }
+
+  await pool.query(
+    `INSERT INTO password_resets (id, user_id, token_hash, expires_at, used_at, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      reset.id,
+      reset.userId,
+      tokenHash,
+      reset.expiresAt,
+      reset.usedAt,
+      reset.createdAt,
+    ],
+  );
+
+  return reset;
+}
+
+async function resetPasswordWithToken({ token, passwordHash }) {
+  const tokenHash = hashToken(token);
+  const timestamp = nowIso();
+
+  if (!USE_DATABASE) {
+    const [users, sessions, resets] = await Promise.all([
+      readJsonFile(USERS_FILE, []),
+      readJsonFile(SESSIONS_FILE, []),
+      readJsonFile(PASSWORD_RESETS_FILE, []),
+    ]);
+    const reset = resets.find((item) => item.tokenHash === tokenHash);
+
+    if (!reset || reset.usedAt || new Date(reset.expiresAt) <= new Date()) {
+      return false;
+    }
+
+    const user = users.find((item) => item.id === reset.userId);
+
+    if (!user) {
+      return false;
+    }
+
+    user.passwordHash = passwordHash;
+    user.updatedAt = timestamp;
+    reset.usedAt = timestamp;
+
+    await Promise.all([
+      writeJsonFile(USERS_FILE, users),
+      writeJsonFile(
+        SESSIONS_FILE,
+        sessions.filter((session) => session.userId !== user.id),
+      ),
+      writeJsonFile(PASSWORD_RESETS_FILE, resets),
+    ]);
+
+    return true;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const resetResult = await client.query(
+      `SELECT *
+       FROM password_resets
+       WHERE token_hash = $1
+         AND used_at IS NULL
+         AND expires_at > NOW()
+       FOR UPDATE`,
+      [tokenHash],
+    );
+    const reset = resetResult.rows[0];
+
+    if (!reset) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+
+    await client.query(
+      `UPDATE users
+       SET password_hash = $2,
+           updated_at = $3
+       WHERE id = $1`,
+      [reset.user_id, passwordHash, timestamp],
+    );
+    await client.query(
+      `UPDATE password_resets
+       SET used_at = $2
+       WHERE id = $1`,
+      [reset.id, timestamp],
+    );
+    await client.query(
+      `DELETE FROM sessions
+       WHERE user_id = $1`,
+      [reset.user_id],
+    );
+    await client.query("COMMIT");
+
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function deleteSessionByToken(token) {
   if (!USE_DATABASE) {
     const sessions = await readJsonFile(SESSIONS_FILE, []);
@@ -637,6 +788,7 @@ export {
   USE_DATABASE,
   createArtifact,
   createProject,
+  createPasswordReset,
   createSession,
   createUser,
   deleteArtifact,
@@ -652,10 +804,12 @@ export {
   mapProject,
   pool,
   readJsonFile,
+  resetPasswordWithToken,
   updateArtifact,
   DATA_DIR,
   USERS_FILE,
   SESSIONS_FILE,
   PROJECTS_FILE,
+  PASSWORD_RESETS_FILE,
   writeJsonFile,
 };

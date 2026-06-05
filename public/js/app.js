@@ -7,6 +7,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const authPassword = document.getElementById("auth-password");
   const authSubmitButton = document.getElementById("auth-submit-button");
   const authModeButton = document.getElementById("auth-mode-button");
+  const authResetRequestButton = document.getElementById(
+    "auth-reset-request-button",
+  );
   const authMessage = document.getElementById("auth-message");
   const homeButton = document.getElementById("home-button");
   const currentUserLabel = document.getElementById("current-user-label");
@@ -41,6 +44,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let currentUser = null;
   let authMode = "login";
+  let passwordResetToken = new URLSearchParams(window.location.search).get(
+    "resetToken",
+  );
   let projects = [];
   let templateSummaries = [];
   let activeProject = null;
@@ -90,13 +96,57 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateAuthMode() {
     const isSignup = authMode === "signup";
+    const isForgot = authMode === "forgot";
+    const isReset = authMode === "reset";
 
-    authName.parentElement.classList.toggle("hidden", !isSignup);
-    authSubmitButton.textContent = isSignup ? "Create account" : "Sign in";
-    authModeButton.textContent = isSignup
-      ? "Already have an account? Sign in"
-      : "Create an account";
-    authMessage.textContent = "";
+    setAuthFieldVisibility(authName, isSignup);
+    setAuthFieldVisibility(authEmail, !isReset);
+    setAuthFieldVisibility(authPassword, !isForgot);
+
+    authName.required = isSignup;
+    authEmail.required = !isReset;
+    authPassword.required = !isForgot;
+    authPassword.placeholder = isReset
+      ? "New password, at least 8 characters"
+      : "At least 8 characters";
+
+    if (isSignup) {
+      authSubmitButton.textContent = "Create account";
+      authModeButton.textContent = "Already have an account? Sign in";
+    } else if (isForgot) {
+      authSubmitButton.textContent = "Create reset link";
+      authModeButton.textContent = "Back to sign in";
+    } else if (isReset) {
+      authSubmitButton.textContent = "Update password";
+      authModeButton.textContent = "Back to sign in";
+    } else {
+      authSubmitButton.textContent = "Sign in";
+      authModeButton.textContent = "Create an account";
+    }
+
+    authResetRequestButton.classList.toggle("hidden", authMode !== "login");
+    setAuthMessage("");
+  }
+
+  function setAuthFieldVisibility(input, isVisible) {
+    input.parentElement.classList.toggle("hidden", !isVisible);
+    input.disabled = !isVisible;
+  }
+
+  function setAuthMessage(message, tone = "") {
+    authMessage.textContent = message;
+    authMessage.dataset.tone = tone;
+  }
+
+  function setAuthResetLink(resetUrl) {
+    authMessage.dataset.tone = "success";
+    authMessage.replaceChildren(
+      document.createTextNode("Demo reset link: "),
+      Object.assign(document.createElement("a"), {
+        href: resetUrl,
+        textContent: "set a new password",
+      }),
+    );
   }
 
   async function loadCurrentUser() {
@@ -802,25 +852,48 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   authModeButton.addEventListener("click", () => {
+    passwordResetToken = null;
     authMode = authMode === "login" ? "signup" : "login";
+    window.history.replaceState({}, "", window.location.pathname);
     updateAuthMode();
+  });
+
+  authResetRequestButton.addEventListener("click", () => {
+    authMode = "forgot";
+    updateAuthMode();
+    authEmail.focus();
   });
 
   authForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    authMessage.textContent = "Working...";
+    setAuthMessage("Working...", "working");
 
     const endpoint =
-      authMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+      authMode === "signup"
+        ? "/api/auth/signup"
+        : authMode === "forgot"
+          ? "/api/auth/password-reset/request"
+          : authMode === "reset"
+            ? "/api/auth/password-reset/confirm"
+            : "/api/auth/login";
 
-    const payload = {
-      email: authEmail.value,
-      password: authPassword.value,
-    };
+    const payload = {};
 
     if (authMode === "signup") {
       payload.name = authName.value;
+    }
+
+    if (authMode !== "reset") {
+      payload.email = authEmail.value;
+    }
+
+    if (authMode !== "forgot") {
+      payload.password = authPassword.value;
+    }
+
+    if (authMode === "reset") {
+      payload.token = passwordResetToken;
     }
 
     try {
@@ -835,14 +908,37 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await response.json();
 
       if (!response.ok) {
-        authMessage.textContent = data.error || "Authentication failed.";
+        setAuthMessage(data.error || "Authentication failed.", "error");
+        return;
+      }
+
+      if (authMode === "forgot") {
+        authForm.reset();
+        if (data.resetUrl) {
+          setAuthResetLink(data.resetUrl);
+        } else {
+          setAuthMessage(data.message, "success");
+        }
+        return;
+      }
+
+      if (authMode === "reset") {
+        authForm.reset();
+        passwordResetToken = null;
+        authMode = "login";
+        window.history.replaceState({}, "", window.location.pathname);
+        updateAuthMode();
+        setAuthMessage(
+          "Password updated. Sign in with your new password.",
+          "success",
+        );
         return;
       }
 
       authForm.reset();
       showAppView(data.user);
     } catch (error) {
-      authMessage.textContent = "Unable to reach the server.";
+      setAuthMessage("Unable to reach the server.", "error");
     }
   });
 
@@ -876,5 +972,11 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   updateAuthMode();
-  loadCurrentUser();
+  if (passwordResetToken) {
+    authMode = "reset";
+    showAuthView();
+    updateAuthMode();
+  } else {
+    loadCurrentUser();
+  }
 });
