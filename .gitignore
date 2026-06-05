@@ -2,3 +2,7 @@ node_modules/
 AGENTS.md
 .agents/
 .codex/
+.env
+data/*
+!data/.gitignore
+!data/templates.json

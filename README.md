@@ -1,32 +1,36 @@
 # ArtifactHub
 
-ArtifactHub is a project documentation workspace for project managers, business analysts, product owners, and delivery teams. The long-term goal is to make project documentation easier by combining reusable templates, private project workspaces, and eventually an AI agent that can guide users through creating high-quality project artifacts.
-
-The current app is a Phase 1 foundation. It supports account-based access, private project workspaces, a template library, artifact drafts, auto-save behavior, and project/artifact deletion.
+ArtifactHub is a project documentation workspace for project managers, business analysts, product owners, and delivery teams. It combines reusable artifact templates, private project workspaces, and a growing AI-ready foundation for producing stronger project documentation with less friction.
 
 ## What It Does Today
 
-- Lets users sign up, log in, and log out
-- Lets users request a demo password reset link and set a new password
+- Supports sign up, sign in, sign out, and a demo password reset flow
 - Keeps project data private to the signed-in user
-- Lets users create and delete projects
-- Displays projects and saved artifacts as a sidebar tree
-- Provides a project management artifact template library
-- Lets users preview templates before selecting a project
-- Creates an artifact only after the user enters content
-- Auto-saves changes to existing artifacts
-- Allows multiple artifacts from the same template, distinguished by timestamp
+- Lets users create and delete project workspaces
+- Provides a project management artifact library with template previews
+- Creates and auto-saves artifact drafts inside project workspaces
+- Exports saved artifacts as Markdown
+- Persists users, sessions, projects, and artifacts in PostgreSQL when `DATABASE_URL` is configured
 
-## Vision
+## Current Hosted Status
 
-ArtifactHub is intended to become an AI-assisted documentation copilot. In later phases, the app should help users complete artifacts through guided questioning, reuse project context across documents, suggest missing information, and eventually analyze uploaded project materials to recommend and generate suitable templates.
+ArtifactHub is deployed publicly on Render as a live demo.
+
+Current hosted facts:
+
+- Hosting platform: Render
+- Runtime: Node.js web service using `npm start`
+- Durable persistence: Render Postgres via `DATABASE_URL`
+- Deployment posture: demo milestone, not yet a production-ready release
+
+The application still supports local JSON fallback when `DATABASE_URL` is not set. That fallback is intended for local development convenience only.
 
 ## Tech Stack
 
 - Node.js
 - Express
 - Vanilla HTML, CSS, and JavaScript
-- PostgreSQL-ready persistence layer with JSON file fallback for local/demo continuity
+- PostgreSQL
 
 ## Run Locally
 
@@ -36,13 +40,19 @@ Install dependencies:
 npm install
 ```
 
+Optional local environment:
+
+```bash
+cp .env.example .env
+```
+
 Start the app:
 
 ```bash
 npm start
 ```
 
-Run the local smoke test:
+Run the smoke test:
 
 ```bash
 npm test
@@ -54,84 +64,47 @@ Open:
 http://localhost:3000
 ```
 
+## Database Notes
+
+- `DATABASE_URL` enables PostgreSQL persistence.
+- Without `DATABASE_URL`, ArtifactHub falls back to local JSON files for runtime data.
+- The checked-in `data/templates.json` file remains product content and is still tracked in git.
+- Mutable local runtime files under `data/` are ignored so test/demo accounts and sessions do not get committed.
+
+The database schema lives in [db/schema.sql](/Users/pv/bootcamp/projects/artifact-hub/db/schema.sql), and the migration script for older JSON-backed demo data is available at [scripts/migrate-json-to-postgres.js](/Users/pv/bootcamp/projects/artifact-hub/scripts/migrate-json-to-postgres.js).
+
 ## Deploy to Render
 
-ArtifactHub can be deployed to Render as a free web service for demo use.
+The included [render.yaml](/Users/pv/bootcamp/projects/artifact-hub/render.yaml) defines:
 
-1. Push this repo to GitHub.
-2. In Render, create a new Web Service from the repo.
-3. Render can use the included [`render.yaml`](/Users/pv/bootcamp/projects/artifact-hub/render.yaml) settings automatically.
-4. Deploy with:
+- The `artifact-hub` Node web service
+- A Render Postgres database named `artifact-hub-db`
+- `DATABASE_URL` wiring from the database to the web service
 
-```txt
-Build Command: npm install
-Start Command: npm start
-```
-
-Important: until the Render Blueprint is synced and `DATABASE_URL` is configured for the hosted service, ArtifactHub stores users, sessions, and projects in local JSON files under `data/`. Render free web services use an ephemeral filesystem, so saved data will be lost on restart, redeploy, or idle spin-down. This deployment is suitable for sharing a demo, not for durable production usage.
-
-## Database Setup
-
-ArtifactHub now supports PostgreSQL when `DATABASE_URL` is present. Without that variable, the app falls back to the existing JSON files in `data/` so local development continues to work without extra setup.
-
-The included [`render.yaml`](/Users/pv/bootcamp/projects/artifact-hub/render.yaml) defines a Render Postgres database and passes its internal connection string to the web service as `DATABASE_URL`.
-
-Recommended rollout for the hosted demo:
-
-1. Commit and push the updated `render.yaml`.
-2. In Render, sync the Blueprint so it creates `artifact-hub-db` and updates the web service environment.
-3. Redeploy the web service so ArtifactHub initializes the database tables on boot.
-4. Run the JSON migration once with the database's external connection string to move existing demo data into PostgreSQL:
+If you are migrating older demo data into Render Postgres, run:
 
 ```bash
-DATABASE_URL="your-render-postgres-url" npm run migrate:json-to-db
+NODE_ENV=production DATABASE_URL="your-render-external-postgres-url" npm run migrate:json-to-db
 ```
-
-The database schema lives in [`db/schema.sql`](/Users/pv/bootcamp/projects/artifact-hub/db/schema.sql), and the migration script copies users, sessions, projects, and nested artifacts from the current JSON files into PostgreSQL.
-
-## Current Hosted Status
-
-ArtifactHub has been deployed successfully to Render as a live public demo.
-
-This is a major milestone because the product is now reachable on the web and can be tested outside the local development environment. The current deployment should be treated as a demonstration environment, not a production-ready release, because persistence still depends on local JSON files in `data/`.
-
-Current known hosting facts:
-
-- Hosting platform: Render
-- Deployment type: free web service
-- Runtime model: Node.js web server using `npm start`
-- Current persistence risk: local JSON data is ephemeral on Render free instances
-- Next infrastructure milestone: move users, sessions, projects, and artifacts to durable hosted storage
-
-## Current Hosted Status
-
-ArtifactHub has been deployed successfully to Render as a live public demo.
-
-This is a major milestone because the product is now reachable on the web and can be tested outside the local development environment. The current deployment should be treated as a demonstration environment, not a production-ready release, because persistence still depends on local JSON files in `data/`.
-
-Current known hosting facts:
-
-- Hosting platform: Render
-- Deployment type: free web service
-- Runtime model: Node.js web server using `npm start`
-- Current persistence risk: local JSON data is ephemeral on Render free instances
-- Next infrastructure milestone: move users, sessions, projects, and artifacts to durable hosted storage
 
 ## Project Structure
 
 ```txt
-data/       JSON-backed prototype data
-docs/       product planning and requirements
-public/     frontend HTML, CSS, and JavaScript
+data/       Template content plus ignored local fallback runtime data
+db/         Database schema
+docs/       Product planning and requirements
+public/     Frontend HTML, CSS, and JavaScript
+scripts/    Migration and smoke-test scripts
 server.js   Express server and API routes
+storage.js  Persistence layer
 ```
 
 ## Product Planning
 
-The main product requirements document is here:
+The main requirements document is here:
 
-- [docs/artifacthub-prd.md](docs/artifacthub-prd.md)
+- [docs/artifacthub-prd.md](/Users/pv/bootcamp/projects/artifact-hub/docs/artifacthub-prd.md)
 
 ## Status
 
-ArtifactHub is under active development. The current focus is completing the Phase 1 product foundation before adding AI-guided artifact completion.
+ArtifactHub is under active development. The current focus is strengthening the hosted product foundation so future AI-assisted artifact workflows can build on stable authentication, persistence, export, and user-management capabilities.

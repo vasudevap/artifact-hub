@@ -10,12 +10,11 @@ The current prototype already demonstrates a template library and dynamic form r
 
 ArtifactHub is now deployed publicly on Render as a live demo environment. This validates that the Phase 1 prototype can be run on the web as a real hosted application rather than only as a local prototype.
 
-Important deployment constraint:
+Important deployment context:
 
-- The current deployment still relies on JSON files in `data/` for users, sessions, projects, and artifacts.
-- Render free web services use ephemeral local storage.
-- As a result, the live deployment is suitable for demos and early smoke testing, but not yet for durable user data.
-- A durable hosted database is the next required infrastructure step before treating the app as a stable online product.
+- The current Render-hosted demo now uses Render Postgres for users, sessions, projects, and artifacts.
+- Local JSON fallback still exists for local development when `DATABASE_URL` is not configured.
+- The hosted environment should still be treated as a demo milestone because broader product capabilities, operational hardening, and production controls are not complete yet.
 
 ## 2. Problem Statement
 
@@ -167,7 +166,7 @@ Requirements:
 Design expectation:
 
 - Phase 1 should not expose all project data to all visitors. Shared data may be acceptable for a local-only demo, but not for a deployed product.
-- The current hosted demo now satisfies the privacy direction at the application layer, but durable persistence still needs to move off local JSON storage before the hosted environment should be treated as production-capable.
+- The current hosted demo now satisfies the privacy direction at the application layer and uses durable PostgreSQL persistence, but it still lacks broader production-readiness controls.
 
 ### 9.2 Project Workspace
 
@@ -258,7 +257,7 @@ Requirements:
 
 Current implementation note:
 
-- The hosted Render demo does not yet satisfy durable persistence requirements because the underlying JSON file storage is ephemeral in that environment.
+- The hosted Render demo now satisfies the durable persistence requirement through PostgreSQL, but future phases should add stronger backup, recovery, and operational visibility practices.
 
 ### 9.8 Export
 
