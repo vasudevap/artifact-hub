@@ -246,7 +246,26 @@ document.addEventListener("DOMContentLoaded", () => {
       showAuthView();
     }
   }
+  function initializeDemoNotice() {
+    const notice = document.getElementById("demo-notice");
+    const dismissButton = document.getElementById("dismiss-demo-notice");
 
+    if (!notice || !dismissButton) {
+      return;
+    }
+
+    const storageKey = "artifacthub.demoNoticeDismissed";
+
+    if (localStorage.getItem(storageKey) === "true") {
+      notice.classList.add("hidden");
+      return;
+    }
+
+    dismissButton.addEventListener("click", () => {
+      notice.classList.add("hidden");
+      localStorage.setItem(storageKey, "true");
+    });
+  }
   async function loadProjects() {
     try {
       projectList.innerHTML = '<li class="loading">Loading projects...</li>';
@@ -763,9 +782,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const counts = document.createElement("small");
       counts.textContent = `${user.projectCount} project${
         user.projectCount === 1 ? "" : "s"
-      } • ${user.artifactCount} artifact${
-        user.artifactCount === 1 ? "" : "s"
-      }`;
+      } • ${user.artifactCount} artifact${user.artifactCount === 1 ? "" : "s"}`;
 
       meta.appendChild(name);
       meta.appendChild(email);
@@ -993,7 +1010,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (
       hasUnsavedChanges &&
-      !confirm("Export the last saved version? Unsaved changes are not included.")
+      !confirm(
+        "Export the last saved version? Unsaved changes are not included.",
+      )
     ) {
       return;
     }
@@ -1037,7 +1056,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function replaceProject(project) {
-    projects = projects.map((item) => (item.id === project.id ? project : item));
+    projects = projects.map((item) =>
+      item.id === project.id ? project : item,
+    );
   }
 
   function getTemplateTitle(templateId) {
@@ -1132,7 +1153,11 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function deleteArtifactFromProject(projectId, artifactId, artifactTitle) {
+  async function deleteArtifactFromProject(
+    projectId,
+    artifactId,
+    artifactTitle,
+  ) {
     if (!activeProject || activeProject.id !== projectId) {
       await selectProject(projectId);
     }
@@ -1298,9 +1323,15 @@ document.addEventListener("DOMContentLoaded", () => {
       closeAccountModal();
     }
   });
-  closeConfirmModalButton.addEventListener("click", () => closeConfirmModal(false));
-  cancelConfirmModalButton.addEventListener("click", () => closeConfirmModal(false));
-  confirmModalSubmitButton.addEventListener("click", () => closeConfirmModal(true));
+  closeConfirmModalButton.addEventListener("click", () =>
+    closeConfirmModal(false),
+  );
+  cancelConfirmModalButton.addEventListener("click", () =>
+    closeConfirmModal(false),
+  );
+  confirmModalSubmitButton.addEventListener("click", () =>
+    closeConfirmModal(true),
+  );
   confirmModal.addEventListener("click", (event) => {
     if (event.target === confirmModal) {
       closeConfirmModal(false);
@@ -1352,6 +1383,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   updateAuthMode();
+  initializeDemoNotice();
   if (passwordResetToken) {
     authMode = "reset";
     showAuthView();

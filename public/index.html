@@ -9,7 +9,7 @@
 <body>
 
     <header class="app-header">
-        <div class="logo">ArtifactHub</div>
+        <div class="logo">ArtifactHub <span class="demo-badge">Active Demo</span></div>
             <div class="header-actions">
                 <button id="home-button" class="icon-button header-icon-button hidden" type="button" aria-label="Refresh page" title="Refresh page">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -76,6 +76,23 @@
 
         <main class="workspace">
             <div id="dashboard-view">
+                <section id="demo-notice" class="demo-notice" aria-labelledby="demo-notice-title">
+                  <button
+                    id="dismiss-demo-notice"
+                    class="demo-notice-close"
+                    type="button"
+                    aria-label="Dismiss active demo notice"
+                  >
+                    ×
+                  </button>
+                  <h2 id="demo-notice-title">Active Demo</h2>
+                  <p>
+                    ArtifactHub is an evolving AI-assisted project documentation workspace.
+                    This demo currently showcases the hosted product foundation. Additional
+                    AI-guided workflows are under active development. Please use fictional
+                    or non-sensitive project information while exploring the application.
+                  </p>
+                </section>
                 <h2>Your Project Workspaces</h2>
                 <p>Create or select a project to start building project management artifacts.</p>
                 <form id="project-form" class="project-form-panel hidden">
@@ -195,7 +212,10 @@
             </div>
         </div>
     </div>
-
+    <footer class="app-footer">
+        ArtifactHub is an active Grafley demo environment. Do not enter confidential
+        or sensitive information.
+    </footer>
     <script src="js/app.js"></script>
 </body>
 </html>

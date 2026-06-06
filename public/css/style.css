@@ -22,6 +22,102 @@ body {
     color: var(--text-dark);
 }
 
+.demo-badge {
+
+    display: inline-flex;
+
+    align-items: center;
+
+    margin-left: 0.65rem;
+
+    padding: 0.18rem 0.5rem;
+
+    border: 1px solid currentColor;
+
+    border-radius: 999px;
+
+    font-size: 0.68rem;
+
+    font-weight: 700;
+
+    letter-spacing: 0.08em;
+
+    line-height: 1;
+
+    text-transform: uppercase;
+
+    opacity: 0.8;
+
+}
+
+.demo-notice {
+
+    position: relative;
+
+    margin-bottom: 1.25rem;
+
+    padding: 1rem 3rem 1rem 1rem;
+
+    border: 1px solid #d9dee8;
+
+    border-radius: 0.75rem;
+
+    background: #f7f9fc;
+
+}
+
+.demo-notice h2 {
+
+    margin: 0 0 0.35rem;
+
+    font-size: 1rem;
+
+}
+
+.demo-notice p {
+
+    margin: 0;
+
+    line-height: 1.55;
+
+}
+
+.demo-notice-close {
+
+    position: absolute;
+
+    top: 0.55rem;
+
+    right: 0.7rem;
+
+    border: 0;
+
+    background: transparent;
+
+    cursor: pointer;
+
+    font-size: 1.45rem;
+
+    line-height: 1;
+
+}
+
+.app-footer {
+
+    margin-top: 2rem;
+
+    padding: 1rem;
+
+    text-align: center;
+
+    font-size: 0.78rem;
+
+    line-height: 1.4;
+
+    opacity: 0.75;
+
+}
+
 .app-header {
     background-color: var(--primary);
     color: white;
@@ -253,12 +349,12 @@ body {
     color: var(--text-dark);
 }
 
-.project-tree-item > .list-row {
+.project-tree-item>.list-row {
     border: 1px solid transparent;
     border-radius: 6px;
 }
 
-.project-tree-item.active > .list-row {
+.project-tree-item.active>.list-row {
     background-color: #eff6ff;
     border-color: #bfdbfe;
     color: var(--primary);
