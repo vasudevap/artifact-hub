@@ -14,6 +14,7 @@ Important deployment context:
 
 - The current Render-hosted demo now uses Render Postgres for users, sessions, projects, and artifacts.
 - The demo also now includes basic password management and in-app admin account cleanup for hosted operations.
+- The live UI now includes an explicit active-demo disclosure and asks users to use fictional or non-sensitive project information.
 - Local JSON fallback still exists for local development when `DATABASE_URL` is not configured.
 - The hosted environment should still be treated as a demo milestone because broader product capabilities, operational hardening, and production controls are not complete yet.
 

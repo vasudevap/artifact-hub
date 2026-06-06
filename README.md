@@ -23,6 +23,7 @@ Current hosted facts:
 - Runtime: Node.js web service using `npm start`
 - Durable persistence: Render Postgres via `DATABASE_URL`
 - Deployment posture: demo milestone, not yet a production-ready release
+- The live UI now includes an explicit `Active Demo` disclosure and a reminder not to use confidential or sensitive information
 
 The application still supports local JSON fallback when `DATABASE_URL` is not set. That fallback is intended for local development convenience only.
 
