@@ -29,6 +29,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const changePasswordMessage = document.getElementById(
     "change-password-message",
   );
+  const adminPanel = document.getElementById("admin-panel");
+  const adminUsersMessage = document.getElementById("admin-users-message");
+  const adminUserList = document.getElementById("admin-user-list");
   const confirmModal = document.getElementById("confirm-modal");
   const confirmModalTitle = document.getElementById("confirm-modal-title");
   const confirmModalMessage = document.getElementById("confirm-modal-message");
@@ -86,6 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let hasUnsavedChanges = false;
   let isChangingPassword = false;
   let confirmResolver = null;
+  let adminUsers = [];
   const newArtifactIds = new Set();
 
   fetch("/api/templates")
@@ -730,6 +734,97 @@ document.addEventListener("DOMContentLoaded", () => {
     changePasswordMessage.dataset.tone = tone;
   }
 
+  function setAdminUsersMessage(message, tone = "") {
+    adminUsersMessage.textContent = message;
+    adminUsersMessage.dataset.tone = tone;
+  }
+
+  function renderAdminUsers() {
+    adminUserList.innerHTML = "";
+
+    if (adminUsers.length === 0) {
+      adminUserList.innerHTML = '<li class="loading">No accounts found.</li>';
+      return;
+    }
+
+    adminUsers.forEach((user) => {
+      const item = document.createElement("li");
+      item.className = "admin-user-item";
+
+      const meta = document.createElement("div");
+      meta.className = "admin-user-meta";
+
+      const name = document.createElement("strong");
+      name.textContent = user.name;
+
+      const email = document.createElement("span");
+      email.textContent = user.email;
+
+      const counts = document.createElement("small");
+      counts.textContent = `${user.projectCount} project${
+        user.projectCount === 1 ? "" : "s"
+      } • ${user.artifactCount} artifact${
+        user.artifactCount === 1 ? "" : "s"
+      }`;
+
+      meta.appendChild(name);
+      meta.appendChild(email);
+      meta.appendChild(counts);
+
+      if (user.id === currentUser?.id) {
+        const badge = document.createElement("span");
+        badge.className = "admin-user-badge";
+        badge.textContent = "Current account";
+        meta.appendChild(badge);
+      }
+
+      item.appendChild(meta);
+
+      if (user.id !== currentUser?.id) {
+        const deleteButton = document.createElement("button");
+        deleteButton.className = "btn-save btn-danger";
+        deleteButton.type = "button";
+        deleteButton.textContent = "Delete";
+        deleteButton.addEventListener("click", () => deleteAdminUser(user));
+        item.appendChild(deleteButton);
+      }
+
+      adminUserList.appendChild(item);
+    });
+  }
+
+  async function loadAdminUsers() {
+    if (!currentUser?.isAdmin) {
+      adminUsers = [];
+      adminPanel.classList.add("hidden");
+      return;
+    }
+
+    adminPanel.classList.remove("hidden");
+    adminUserList.innerHTML = '<li class="loading">Loading accounts...</li>';
+    setAdminUsersMessage("");
+
+    try {
+      const response = await fetch("/api/admin/users");
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAdminUsersMessage(
+          data.error || "Unable to load admin accounts.",
+          "error",
+        );
+        adminUserList.innerHTML = "";
+        return;
+      }
+
+      adminUsers = data.users || [];
+      renderAdminUsers();
+    } catch (error) {
+      setAdminUsersMessage("Unable to reach the server.", "error");
+      adminUserList.innerHTML = "";
+    }
+  }
+
   function openAccountModal() {
     if (!currentUser) {
       return;
@@ -741,9 +836,11 @@ document.addEventListener("DOMContentLoaded", () => {
     resetPasswordField(confirmPasswordInput);
     resetPasswordVisibility();
     setChangePasswordMessage("");
+    setAdminUsersMessage("");
     accountModal.classList.remove("hidden");
     currentUserButton.setAttribute("aria-expanded", "true");
     currentPasswordInput.focus();
+    loadAdminUsers();
   }
 
   function closeAccountModal() {
@@ -755,6 +852,9 @@ document.addEventListener("DOMContentLoaded", () => {
     resetPasswordField(confirmPasswordInput);
     resetPasswordVisibility();
     setChangePasswordMessage("");
+    setAdminUsersMessage("");
+    adminPanel.classList.add("hidden");
+    adminUserList.innerHTML = "";
     isChangingPassword = false;
   }
 
@@ -845,6 +945,41 @@ document.addEventListener("DOMContentLoaded", () => {
     return new Promise((resolve) => {
       confirmResolver = resolve;
     });
+  }
+
+  async function deleteAdminUser(user) {
+    const confirmed = await confirmWithModal({
+      title: "Delete Account",
+      message: `Delete the account for "${user.email}" and all of its projects and artifacts? This cannot be undone.`,
+      confirmLabel: "Delete Account",
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    setAdminUsersMessage(`Deleting ${user.email}...`, "working");
+
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAdminUsersMessage(
+          data.error || "Unable to delete that account.",
+          "error",
+        );
+        return;
+      }
+
+      adminUsers = adminUsers.filter((item) => item.id !== user.id);
+      renderAdminUsers();
+      setAdminUsersMessage("Account deleted.", "success");
+    } catch (error) {
+      setAdminUsersMessage("Unable to reach the server.", "error");
+    }
   }
 
   function updateArtifactExportButton() {

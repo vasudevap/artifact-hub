@@ -163,6 +163,18 @@
                     <button id="change-password-submit-button" class="btn-save" type="submit">Update Password</button>
                 </div>
             </form>
+            <section id="admin-panel" class="admin-panel hidden">
+                <div class="admin-panel-header">
+                    <div>
+                        <h3>Admin</h3>
+                        <p>Manage demo accounts without using the database directly.</p>
+                    </div>
+                </div>
+                <p id="admin-users-message" class="status-message"></p>
+                <ul id="admin-user-list" class="admin-user-list">
+                    <li class="loading">Loading accounts...</li>
+                </ul>
+            </section>
         </div>
     </div>
 

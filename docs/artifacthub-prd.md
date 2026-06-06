@@ -13,6 +13,7 @@ ArtifactHub is now deployed publicly on Render as a live demo environment. This 
 Important deployment context:
 
 - The current Render-hosted demo now uses Render Postgres for users, sessions, projects, and artifacts.
+- The demo also now includes basic password management and in-app admin account cleanup for hosted operations.
 - Local JSON fallback still exists for local development when `DATABASE_URL` is not configured.
 - The hosted environment should still be treated as a demo milestone because broader product capabilities, operational hardening, and production controls are not complete yet.
 

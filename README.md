@@ -5,6 +5,7 @@ ArtifactHub is a project documentation workspace for project managers, business 
 ## What It Does Today
 
 - Supports sign up, sign in, sign out, and a demo password reset flow
+- Supports signed-in password changes and admin-only account cleanup
 - Keeps project data private to the signed-in user
 - Lets users create and delete project workspaces
 - Provides a project management artifact library with template previews
@@ -46,6 +47,12 @@ Optional local environment:
 cp .env.example .env
 ```
 
+Optional admin setup:
+
+```bash
+ADMIN_EMAILS=you@example.com
+```
+
 Start the app:
 
 ```bash
@@ -67,6 +74,7 @@ http://localhost:3000
 ## Database Notes
 
 - `DATABASE_URL` enables PostgreSQL persistence.
+- `ADMIN_EMAILS` accepts a comma-separated list of admin account emails.
 - Without `DATABASE_URL`, ArtifactHub falls back to local JSON files for runtime data.
 - The checked-in `data/templates.json` file remains product content and is still tracked in git.
 - Mutable local runtime files under `data/` are ignored so test/demo accounts and sessions do not get committed.
@@ -86,6 +94,14 @@ If you are migrating older demo data into Render Postgres, run:
 ```bash
 NODE_ENV=production DATABASE_URL="your-render-external-postgres-url" npm run migrate:json-to-db
 ```
+
+If you want in-app admin account management on Render, set:
+
+```txt
+ADMIN_EMAILS=admin1@example.com,admin2@example.com
+```
+
+Admins can open the account modal from the signed-in username and remove demo accounts without connecting to the database directly.
 
 ## Project Structure
 
@@ -107,4 +123,4 @@ The main requirements document is here:
 
 ## Status
 
-ArtifactHub is under active development. The current focus is strengthening the hosted product foundation so future AI-assisted artifact workflows can build on stable authentication, persistence, export, and user-management capabilities.
+ArtifactHub is under active development. The hosted product foundation is now in place for the live demo, including durable persistence, private user data, export, password management, smoke-test coverage, and basic admin account cleanup. The next focus is deeper Phase 1 product depth and then AI-assisted artifact workflows.

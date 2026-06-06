@@ -16,19 +16,31 @@ async function run() {
   process.env.DATA_DIR = dataDir;
   process.env.DATABASE_URL = "";
   process.env.NODE_ENV = "test";
+  process.env.ADMIN_EMAILS = "admin@example.com";
 
   const { app } = await import("../server.js");
   const agent = request.agent(app);
+  const memberAgent = request.agent(app);
 
   try {
-    const email = `smoke-${Date.now()}@example.com`;
+    const email = "admin@example.com";
+    const memberEmail = `smoke-${Date.now()}@example.com`;
 
     await agent
       .post("/api/auth/signup")
       .send({
-        name: "Smoke Test",
+        name: "Smoke Admin",
         email,
         password: "password123",
+      })
+      .expect(201);
+
+    await memberAgent
+      .post("/api/auth/signup")
+      .send({
+        name: "Smoke Member",
+        email: memberEmail,
+        password: "memberpass123",
       })
       .expect(201);
 
@@ -72,6 +84,40 @@ async function run() {
         password: "new-password123",
       })
       .expect(200);
+
+    const adminUsersResponse = await agent.get("/api/admin/users").expect(200);
+
+    if (!Array.isArray(adminUsersResponse.body.users)) {
+      throw new Error("Expected admin users response to include a users array.");
+    }
+
+    const memberUser = adminUsersResponse.body.users.find(
+      (user) => user.email === memberEmail,
+    );
+
+    if (!memberUser) {
+      throw new Error("Expected admin user list to include the member account.");
+    }
+
+    await agent.delete(`/api/admin/users/${memberUser.id}`).expect(200);
+
+    const adminUser = adminUsersResponse.body.users.find(
+      (user) => user.email === email,
+    );
+
+    if (!adminUser) {
+      throw new Error("Expected admin user list to include the admin account.");
+    }
+
+    await agent.delete(`/api/admin/users/${adminUser.id}`).expect(400);
+
+    await request(app)
+      .post("/api/auth/login")
+      .send({
+        email: memberEmail,
+        password: "memberpass123",
+      })
+      .expect(401);
 
     await agent
       .post("/api/auth/password-change")

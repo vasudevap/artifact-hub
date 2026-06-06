@@ -477,6 +477,69 @@ textarea.form-control {
     margin-left: 0;
 }
 
+.admin-panel {
+    border-top: 1px solid var(--border);
+    margin-top: 24px;
+    padding-top: 20px;
+}
+
+.admin-panel-header h3 {
+    margin: 0 0 6px;
+}
+
+.admin-panel-header p {
+    color: var(--text-muted);
+    margin: 0 0 14px;
+}
+
+.admin-user-list {
+    display: grid;
+    gap: 10px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.admin-user-item {
+    align-items: center;
+    background-color: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    padding: 12px 14px;
+}
+
+.admin-user-item strong,
+.admin-user-item span,
+.admin-user-item small {
+    display: block;
+}
+
+.admin-user-item span,
+.admin-user-item small {
+    color: var(--text-muted);
+}
+
+.admin-user-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-user-badge {
+    background-color: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    color: #3730a3 !important;
+    display: inline-flex !important;
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 6px;
+    padding: 2px 8px;
+    text-transform: uppercase;
+}
+
 .status-message {
     color: var(--text-muted);
     font-size: 14px;

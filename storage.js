@@ -598,6 +598,51 @@ async function getUserBySessionToken(token) {
   return result.rows[0] || null;
 }
 
+async function listUsersForAdmin() {
+  if (!USE_DATABASE) {
+    const [users, projects] = await Promise.all([
+      readJsonFile(USERS_FILE, []),
+      readJsonFile(PROJECTS_FILE, []),
+    ]);
+
+    return users
+      .map((user) => {
+        const ownedProjects = projects.filter((project) => project.ownerId === user.id);
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+          projectCount: ownedProjects.length,
+          artifactCount: ownedProjects.reduce(
+            (count, project) => count + project.artifacts.length,
+            0,
+          ),
+        };
+      })
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
+  const result = await pool.query(
+    `SELECT
+       u.id,
+       u.name,
+       u.email,
+       u.created_at AS "createdAt",
+       u.updated_at AS "updatedAt",
+       COUNT(DISTINCT p.id)::int AS "projectCount",
+       COUNT(a.id)::int AS "artifactCount"
+     FROM users u
+     LEFT JOIN projects p ON p.owner_id = u.id
+     LEFT JOIN artifacts a ON a.project_id = p.id
+     GROUP BY u.id
+     ORDER BY u.created_at DESC`,
+  );
+
+  return result.rows;
+}
+
 async function createUser({ name, email, passwordHash }) {
   const timestamp = nowIso();
   const user = {
@@ -840,6 +885,51 @@ async function changePasswordForUser({ userId, passwordHash }) {
   return true;
 }
 
+async function deleteUserById(userId) {
+  if (!USE_DATABASE) {
+    const [users, sessions, projects, resets] = await Promise.all([
+      readJsonFile(USERS_FILE, []),
+      readJsonFile(SESSIONS_FILE, []),
+      readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(PASSWORD_RESETS_FILE, []),
+    ]);
+    const exists = users.some((user) => user.id === userId);
+
+    if (!exists) {
+      return false;
+    }
+
+    await Promise.all([
+      writeJsonFile(
+        USERS_FILE,
+        users.filter((user) => user.id !== userId),
+      ),
+      writeJsonFile(
+        SESSIONS_FILE,
+        sessions.filter((session) => session.userId !== userId),
+      ),
+      writeJsonFile(
+        PROJECTS_FILE,
+        projects.filter((project) => project.ownerId !== userId),
+      ),
+      writeJsonFile(
+        PASSWORD_RESETS_FILE,
+        resets.filter((reset) => reset.userId !== userId),
+      ),
+    ]);
+
+    return true;
+  }
+
+  const result = await pool.query(
+    `DELETE FROM users
+     WHERE id = $1`,
+    [userId],
+  );
+
+  return result.rowCount > 0;
+}
+
 async function deleteSessionByToken(token) {
   if (!USE_DATABASE) {
     const sessions = await readJsonFile(SESSIONS_FILE, []);
@@ -865,6 +955,7 @@ export {
   createUser,
   deleteArtifact,
   deleteProjectByIdAndOwnerId,
+  deleteUserById,
   deleteSessionByToken,
   getProjectByIdAndOwnerId,
   getStorageHealth,
@@ -872,6 +963,7 @@ export {
   getUserByEmail,
   getUserBySessionToken,
   initDatabase,
+  listUsersForAdmin,
   listProjectsByOwnerId,
   mapArtifact,
   mapProject,

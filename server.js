@@ -14,12 +14,14 @@ import {
   deleteArtifact,
   deleteProjectByIdAndOwnerId,
   deleteSessionByToken,
+  deleteUserById,
   getProjectByIdAndOwnerId,
   getStorageHealth,
   getUserById,
   getUserByEmail,
   getUserBySessionToken,
   initDatabase,
+  listUsersForAdmin,
   listProjectsByOwnerId,
   resetPasswordWithToken,
   updateArtifact,
@@ -32,6 +34,12 @@ const PORT = Number(process.env.PORT) || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSION_COOKIE_NAME = "artifacthub_session";
+const ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((email) => normalizeEmail(email))
+    .filter(Boolean),
+);
 
 function normalizeEmail(email) {
   return String(email || "")
@@ -61,6 +69,7 @@ function safeUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
+    isAdmin: ADMIN_EMAILS.has(normalizeEmail(user.email)),
     createdAt: user.createdAt,
   };
 }
@@ -171,6 +180,14 @@ async function requireAuth(req, res, next) {
   }
 
   req.user = user;
+  next();
+}
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_EMAILS.has(normalizeEmail(req.user?.email))) {
+    return res.status(403).json({ error: "Administrator access required." });
+  }
+
   next();
 }
 
@@ -399,6 +416,43 @@ app.get("/api/auth/me", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch current user." });
   }
 });
+
+app.get("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json({
+      users: await listUsersForAdmin(),
+    });
+  } catch (error) {
+    console.error("Failed to fetch admin users.", error);
+    res.status(500).json({ error: "Failed to fetch admin users." });
+  }
+});
+
+app.delete(
+  "/api/admin/users/:userId",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      if (req.params.userId === req.user.id) {
+        return res.status(400).json({
+          error: "Use a different admin account if you need to remove this one.",
+        });
+      }
+
+      const deleted = await deleteUserById(req.params.userId);
+
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found." });
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Failed to delete user.", error);
+      res.status(500).json({ error: "Failed to delete user." });
+    }
+  },
+);
 
 app.get("/api/projects", requireAuth, async (req, res) => {
   try {
