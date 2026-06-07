@@ -199,6 +199,12 @@ body {
     padding: 8px 12px;
 }
 
+.mockup-link {
+    align-items: center;
+    display: inline-flex;
+    text-decoration: none;
+}
+
 .btn-secondary {
     background-color: white;
     color: var(--text-dark);

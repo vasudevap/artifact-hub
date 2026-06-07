@@ -1,8 +1,11 @@
 node_modules/
-AGENTS.md
-.agents/
-.codex/
-.env
+/.private/
+/docs/
+/screenshots/
+.DS_Store
+/.env
+.env.*
+!.env.example
 data/*
 !data/.gitignore
 !data/templates.json

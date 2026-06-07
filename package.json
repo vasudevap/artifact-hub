@@ -4,7 +4,10 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
+    "check:public": "node scripts/check-public-boundary.js",
     "migrate:json-to-db": "node scripts/migrate-json-to-postgres.js",
+    "seed:demo": "node scripts/seed-demo.js",
+    "setup:hooks": "git config core.hooksPath .githooks",
     "smoke": "node scripts/smoke-test.js",
     "test": "npm run smoke",
     "start": "node server.js"

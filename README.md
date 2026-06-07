@@ -1,40 +1,70 @@
 # ArtifactHub
 
-ArtifactHub is a project documentation workspace for project managers, business analysts, product owners, and delivery teams. It combines reusable artifact templates, private project workspaces, and a growing AI-ready foundation for producing stronger project documentation with less friction.
+ArtifactHub is a project documentation workspace for project managers,
+business analysts, product owners, and delivery teams. Its objective is to
+make important project knowledge easier to structure, maintain, and reuse
+through a consistent library of practical artifacts.
 
-## What It Does Today
+## Visual Direction
 
-- Supports sign up, sign in, sign out, and a demo password reset flow
-- Supports signed-in password changes and admin-only account cleanup
-- Keeps project data private to the signed-in user
-- Lets users create and delete project workspaces
-- Provides a project management artifact library with template previews
-- Creates and auto-saves artifact drafts inside project workspaces
+ArtifactHub should feel like a calm, premium project-delivery workspace for
+professional project managers. The product is guided-workflow-first, with a
+document-oriented editor as the main working surface.
+
+The intended visual language combines disciplined hierarchy and compact
+controls, refined editorial polish, and a structured-knowledge metaphor built
+around reusable document blocks, layered information, and clear progress
+through a body of work.
+
+The interface should favor:
+
+- a restrained light-mode foundation with warm off-white canvases and white or
+  near-white document surfaces
+- muted cool-grey borders, dark slate typography, and a muted teal accent for
+  active states and primary actions
+- soft green, subdued amber, and restrained red for semantic status states
+- crisp typography, thin separators, subtle motion, careful spacing, and light
+  elevation only where contextual emphasis is needed
+- a document-first experience that feels closer to a refined editorial
+  workspace than a dashboard, admin panel, or chatbot shell
+
+Avoid saturated teal, neon colors, heavy gradients, pill-heavy softness, and
+purple AI-product styling. AI guidance should feel contextual and supportive,
+but it should recede during focused editing rather than dominate the interface.
+
+The current visual baseline reflects the approved mockup direction for the
+Projects dashboard, project workspace, Artifact Library, Project Charter
+editor (guided drafting and review), and RAID Log workflow.
+
+## Live Demo
+
+ArtifactHub is available as an [Active Demo on
+Render](https://artifact-hub-y528.onrender.com/).
+
+The hosted service is an evaluation environment, not a production-ready
+release. Do not enter confidential, sensitive, regulated, or personally
+identifiable information. The application displays this disclosure in the
+header and within the signed-in experience.
+
+## What The Demo Does Today
+
+- Supports account creation, sign in, sign out, password reset, and signed-in
+  password changes
+- Keeps projects and artifacts private to the signed-in account
+- Creates and deletes project workspaces
+- Provides reusable project artifact templates with previews
+- Creates, edits, and auto-saves artifact drafts
 - Exports saved artifacts as Markdown
-- Persists users, sessions, projects, and artifacts in PostgreSQL when `DATABASE_URL` is configured
-
-## Current Hosted Status
-
-ArtifactHub is deployed publicly on Render as a live demo.
-
-Current hosted facts:
-
-- Hosting platform: Render
-- Runtime: Node.js web service using `npm start`
-- Durable persistence: Render Postgres via `DATABASE_URL`
-- Deployment posture: demo milestone, not yet a production-ready release
-- The live UI now includes an explicit `Active Demo` disclosure and a reminder not to use confidential or sensitive information
-
-The application still supports local JSON fallback when `DATABASE_URL` is not set. That fallback is intended for local development convenience only.
-
-## Tech Stack
-
-- Node.js
-- Express
-- Vanilla HTML, CSS, and JavaScript
-- PostgreSQL
+- Gives configured administrators basic demo-account cleanup controls
+- Stores users, sessions, projects, and artifacts in PostgreSQL when
+  `DATABASE_URL` is configured
 
 ## Run Locally
+
+Prerequisites:
+
+- Node.js 18 or newer
+- npm
 
 Install dependencies:
 
@@ -42,86 +72,81 @@ Install dependencies:
 npm install
 ```
 
-Optional local environment:
+Optionally create a local environment file:
 
 ```bash
 cp .env.example .env
 ```
 
-Optional admin setup:
-
-```bash
-ADMIN_EMAILS=you@example.com
-```
-
-Start the app:
+Start the application:
 
 ```bash
 npm start
 ```
 
-Run the smoke test:
+Open `http://localhost:3000`.
+
+Without `DATABASE_URL`, the application uses ignored JSON files under `data/`
+for local development. To reset those files and load fictional sample
+projects and artifacts, run:
+
+```bash
+npm run seed:demo
+```
+
+The local demo accounts are:
+
+- `demo@artifacthub.local` / `DemoPass123!`
+- `admin@artifacthub.local` / `AdminPass123!`
+
+The seeder refuses to run when `DATABASE_URL` is set so it cannot overwrite a
+configured PostgreSQL environment.
+
+Run the smoke test and public-repository safety check with:
 
 ```bash
 npm test
+npm run check:public
 ```
 
-Open:
+## Configuration
 
-```txt
-http://localhost:3000
-```
+The supported environment variables are:
 
-## Database Notes
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | Enables PostgreSQL persistence instead of local JSON files |
+| `PUBLIC_URL` | Sets the public base URL used by generated links |
+| `ADMIN_EMAILS` | Comma-separated account emails with demo administration access |
+| `PORT` | Overrides the default HTTP port of `3000` |
 
-- `DATABASE_URL` enables PostgreSQL persistence.
-- `ADMIN_EMAILS` accepts a comma-separated list of admin account emails.
-- Without `DATABASE_URL`, ArtifactHub falls back to local JSON files for runtime data.
-- The checked-in `data/templates.json` file remains product content and is still tracked in git.
-- Mutable local runtime files under `data/` are ignored so test/demo accounts and sessions do not get committed.
-
-The database schema lives in [db/schema.sql](/Users/pv/bootcamp/projects/artifact-hub/db/schema.sql), and the migration script for older JSON-backed demo data is available at [scripts/migrate-json-to-postgres.js](/Users/pv/bootcamp/projects/artifact-hub/scripts/migrate-json-to-postgres.js).
-
-## Deploy to Render
-
-The included [render.yaml](/Users/pv/bootcamp/projects/artifact-hub/render.yaml) defines:
-
-- The `artifact-hub` Node web service
-- A Render Postgres database named `artifact-hub-db`
-- `DATABASE_URL` wiring from the database to the web service
-
-If you are migrating older demo data into Render Postgres, run:
+The PostgreSQL schema is in [`db/schema.sql`](db/schema.sql). Existing local
+JSON demo data can be migrated with:
 
 ```bash
-NODE_ENV=production DATABASE_URL="your-render-external-postgres-url" npm run migrate:json-to-db
+NODE_ENV=production DATABASE_URL="your-postgres-url" npm run migrate:json-to-db
 ```
 
-If you want in-app admin account management on Render, set:
+## Deploy To Render
 
-```txt
-ADMIN_EMAILS=admin1@example.com,admin2@example.com
-```
-
-Admins can open the account modal from the signed-in username and remove demo accounts without connecting to the database directly.
+[`render.yaml`](render.yaml) defines the Node web service, PostgreSQL database,
+and `DATABASE_URL` connection. A Render deployment uses `npm start` and should
+set `PUBLIC_URL` and `ADMIN_EMAILS` for the deployed environment as needed.
 
 ## Project Structure
 
-```txt
-data/       Template content plus ignored local fallback runtime data
-db/         Database schema
-docs/       Product planning and requirements
-public/     Frontend HTML, CSS, and JavaScript
-scripts/    Migration and smoke-test scripts
+```text
+data/       Public template content and ignored local runtime data
+db/         PostgreSQL schema
+public/     Browser UI assets
+scripts/    Demo seeding, migration, testing, and repository checks
 server.js   Express server and API routes
-storage.js  Persistence layer
+storage.js  PostgreSQL and local-development persistence layer
 ```
 
-## Product Planning
+## Current Limitations
 
-The main requirements document is here:
-
-- [docs/artifacthub-prd.md](/Users/pv/bootcamp/projects/artifact-hub/docs/artifacthub-prd.md)
-
-## Status
-
-ArtifactHub is under active development. The hosted product foundation is now in place for the live demo, including durable persistence, private user data, export, password management, smoke-test coverage, and basic admin account cleanup. The next focus is deeper Phase 1 product depth and then AI-assisted artifact workflows.
+ArtifactHub is an active demo and does not provide production security,
+availability, backup, recovery, or support guarantees. Local JSON storage is
+for development only, account ownership is single-user, password reset is
+demo-oriented, and Markdown is the currently supported export format.
