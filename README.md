@@ -50,14 +50,23 @@ header and within the signed-in experience.
 
 - Supports account creation, sign in, sign out, password reset, and signed-in
   password changes
-- Keeps projects and artifacts private to the signed-in account
-- Creates and deletes project workspaces
-- Provides reusable project artifact templates with previews
-- Creates, edits, and auto-saves artifact drafts
-- Exports saved artifacts as Markdown
+- Creates project workspaces and routes directly into reusable Project Context
+- Keeps project context, artifacts, conversations, reviews, versions, and
+  exports private to the owning account
+- Provides a versioned artifact catalog, including Project Charter v2 and a
+  manually editable Communications Plan
+- Creates, edits, and auto-saves revisioned artifact drafts with stale-edit
+  protection
+- Supports allowlisted AI-guided Charter interview, drafting, refinement, and
+  review through deterministic fake or OpenAI providers
+- Calculates completeness from required fields and blocks approval while
+  required content or blocking findings remain unresolved
+- Creates immutable approved snapshots that can be reopened without losing
+  prior versions
+- Provides export preview plus server-generated Markdown and DOCX files
 - Gives configured administrators basic demo-account cleanup controls
-- Stores users, sessions, projects, and artifacts in PostgreSQL when
-  `DATABASE_URL` is configured
+- Stores product state in PostgreSQL when `DATABASE_URL` is configured, with
+  local JSON retained for local development only
 
 ## Run Locally
 
@@ -78,13 +87,17 @@ Optionally create a local environment file:
 cp .env.example .env
 ```
 
-Start the application:
+Build and start the application:
 
 ```bash
+npm run build
 npm start
 ```
 
 Open `http://localhost:3000`.
+
+For frontend development, run the Express API with `npm start` and Vite with
+`npm run dev`, then open `http://localhost:5173`.
 
 Without `DATABASE_URL`, the application uses ignored JSON files under `data/`
 for local development. To reset those files and load fictional sample
@@ -106,6 +119,7 @@ Run the smoke test and public-repository safety check with:
 
 ```bash
 npm test
+npm run test:e2e
 npm run check:public
 ```
 
@@ -118,10 +132,17 @@ The supported environment variables are:
 | `DATABASE_URL` | Enables PostgreSQL persistence instead of local JSON files |
 | `PUBLIC_URL` | Sets the public base URL used by generated links |
 | `ADMIN_EMAILS` | Comma-separated account emails with demo administration access |
+| `AI_FEATURE_ENABLED` | Enables the AI assistant feature gate |
+| `AI_BETA_EMAILS` | Comma-separated emails allowed to use the AI assistant |
+| `AI_PROVIDER` | Selects `fake` or `openai` |
+| `OPENAI_API_KEY` | Configures the OpenAI provider |
+| `OPENAI_MODEL` | Overrides the default `gpt-5.5` model |
+| `OPENAI_REASONING_EFFORT` | Overrides the default `medium` reasoning effort |
 | `PORT` | Overrides the default HTTP port of `3000` |
 
-The PostgreSQL schema is in [`db/schema.sql`](db/schema.sql). Existing local
-JSON demo data can be migrated with:
+Numbered PostgreSQL migrations under [`db/migrations`](db/migrations) run with
+checksums and an advisory lock before the server begins listening. Existing
+local JSON demo data can be migrated with:
 
 ```bash
 NODE_ENV=production DATABASE_URL="your-postgres-url" npm run migrate:json-to-db
@@ -130,23 +151,26 @@ NODE_ENV=production DATABASE_URL="your-postgres-url" npm run migrate:json-to-db
 ## Deploy To Render
 
 [`render.yaml`](render.yaml) defines the Node web service, PostgreSQL database,
-and `DATABASE_URL` connection. A Render deployment uses `npm start` and should
-set `PUBLIC_URL` and `ADMIN_EMAILS` for the deployed environment as needed.
+frontend build, and `DATABASE_URL` connection. Deploy with AI disabled first,
+then set the AI provider variables and an explicit beta allowlist after the
+hosted empty-account flow passes smoke testing.
 
 ## Project Structure
 
 ```text
-data/       Public template content and ignored local runtime data
-db/         PostgreSQL schema
-public/     Browser UI assets
-scripts/    Demo seeding, migration, testing, and repository checks
-server.js   Express server and API routes
-storage.js  PostgreSQL and local-development persistence layer
+data/           Versioned template content and ignored local runtime data
+db/migrations/  Forward-only PostgreSQL migrations
+public/         Legacy static assets retained during rollout
+scripts/        Demo seeding, migration, testing, and safety checks
+src/            React and TypeScript client
+server.js       Express application and established API routes
+phase1-*.js     Guided-workflow API and persistence modules
+storage.js      Core PostgreSQL and local-development persistence
 ```
 
 ## Current Limitations
 
 ArtifactHub is an active demo and does not provide production security,
 availability, backup, recovery, or support guarantees. Local JSON storage is
-for development only, account ownership is single-user, password reset is
-demo-oriented, and Markdown is the currently supported export format.
+for development only, account ownership and approval are single-user, password
+reset is demo-oriented, and PDF/share-link workflows are not included.

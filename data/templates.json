@@ -1,7 +1,9 @@
 {
   "business-case": {
-    "title": "Business Case (PMO/BA - Pre-Initiation)",
+    "title": "Business Case",
+    "role": "PMO/BA - Pre-Initiation",
     "description": "Justifies why the project should exist by defining the problem, expected value, options, costs, risks, and success measures.",
+    "stageKey": "define",
     "fields": [
       {"id": "initiative_name", "label": "Initiative Name", "type": "text", "placeholder": "e.g., Customer Onboarding Modernization"},
       {"id": "business_problem", "label": "Business Problem or Opportunity", "type": "textarea", "placeholder": "What is happening today that requires investment?"},
@@ -11,19 +13,50 @@
     ]
   },
   "project-charter": {
-    "title": "Project Charter (PM - Initiation)",
-    "description": "Formally authorizes the project and establishes its purpose, scope boundaries, leadership, and high-level success conditions.",
+    "version": 2,
+    "title": "Project Charter",
+    "role": "PM - Initiation",
+    "description": "Defines the project purpose, measurable objectives, scope boundaries, key stakeholders, delivery risks, and success conditions.",
+    "category": "Project Initiation",
+    "lifecycleStage": "Initiation",
+    "stageKey": "authorize",
+    "aiEnabled": true,
+    "recommended": true,
+    "recommendationMetadata": {
+      "priority": 1,
+      "when": ["new-project", "charter-missing"]
+    },
     "fields": [
-      {"id": "project_name", "label": "Project Name", "type": "text", "placeholder": "e.g., E-Commerce Checkout Optimization"},
-      {"id": "objective", "label": "Project Objective", "type": "textarea", "placeholder": "What business outcome will this project achieve?"},
-      {"id": "high_level_scope", "label": "High-Level Scope", "type": "textarea", "placeholder": "Summarize what is in and out of scope."},
-      {"id": "sponsor", "label": "Project Sponsor", "type": "text", "placeholder": "Executive sponsor name"},
-      {"id": "success_criteria", "label": "Success Criteria", "type": "textarea", "placeholder": "How will the project be judged successful?"}
-    ]
+      {"id": "project_overview", "label": "Project Overview", "type": "textarea", "required": true, "section": "Overview", "placeholder": "Summarize the project purpose and intended business outcome."},
+      {"id": "objectives", "label": "Objectives", "type": "list", "required": true, "section": "Objectives", "placeholder": "Add a measurable project objective."},
+      {"id": "scope", "label": "Scope", "type": "scope", "required": true, "section": "Scope", "placeholder": "Define what is in scope and explicitly out of scope."},
+      {"id": "stakeholders", "label": "Stakeholders", "type": "table", "required": true, "section": "Stakeholders", "columns": ["role", "name", "responsibility"]},
+      {"id": "risks", "label": "Risks", "type": "table", "required": true, "section": "Risks", "columns": ["description", "impact", "mitigation", "owner"]},
+      {"id": "success_criteria", "label": "Success Criteria", "type": "list", "required": true, "section": "Success Criteria", "placeholder": "Add a measurable success condition."}
+    ],
+    "versions": {
+      "1": {
+        "version": 1,
+        "title": "Project Charter",
+        "role": "PM - Initiation",
+        "description": "Formally authorizes the project and establishes its purpose, scope boundaries, leadership, and high-level success conditions.",
+        "category": "Project Initiation",
+        "lifecycleStage": "Initiation",
+        "fields": [
+          {"id": "project_name", "label": "Project Name", "type": "text", "required": true, "placeholder": "e.g., E-Commerce Checkout Optimization"},
+          {"id": "objective", "label": "Project Objective", "type": "textarea", "required": true, "placeholder": "What business outcome will this project achieve?"},
+          {"id": "high_level_scope", "label": "High-Level Scope", "type": "textarea", "required": true, "placeholder": "Summarize what is in and out of scope."},
+          {"id": "sponsor", "label": "Project Sponsor", "type": "text", "required": true, "placeholder": "Executive sponsor name"},
+          {"id": "success_criteria", "label": "Success Criteria", "type": "textarea", "required": true, "placeholder": "How will the project be judged successful?"}
+        ]
+      }
+    }
   },
   "stakeholder-register": {
-    "title": "Stakeholder Register and Engagement Plan (PM/BA - Initiation)",
+    "title": "Stakeholder Register and Engagement Plan",
+    "role": "PM/BA - Initiation",
     "description": "Identifies stakeholders, their interests, influence, impacts, and the approach for engaging them throughout the project.",
+    "stageKey": "authorize",
     "fields": [
       {"id": "stakeholder_groups", "label": "Stakeholder Groups", "type": "textarea", "placeholder": "List key stakeholder groups, roles, and representatives."},
       {"id": "needs_and_concerns", "label": "Needs, Concerns, and Expectations", "type": "textarea", "placeholder": "What matters most to each major stakeholder group?"},
@@ -33,8 +66,10 @@
     ]
   },
   "integrated-project-plan": {
-    "title": "Integrated Project Plan (PMO - Planning)",
+    "title": "Integrated Project Plan",
+    "role": "PMO - Planning",
     "description": "Provides the working plan for delivery, including approach, milestones, governance, controls, and execution rhythms.",
+    "stageKey": "plan",
     "fields": [
       {"id": "delivery_approach", "label": "Delivery Approach", "type": "textarea", "placeholder": "Describe the lifecycle, work model, and major phases."},
       {"id": "major_milestones", "label": "Major Milestones", "type": "textarea", "placeholder": "List major milestones, stage gates, and target dates."},
@@ -44,8 +79,10 @@
     ]
   },
   "scope-statement": {
-    "title": "Scope Statement and Deliverables Baseline (PM/BA - Planning)",
+    "title": "Scope Statement and Deliverables Baseline",
+    "role": "PM/BA - Planning",
     "description": "Defines the detailed project and product scope, key deliverables, acceptance criteria, assumptions, constraints, and exclusions.",
+    "stageKey": "plan",
     "fields": [
       {"id": "product_scope", "label": "Product or Service Scope", "type": "textarea", "placeholder": "Describe the product, service, or capability being delivered."},
       {"id": "project_deliverables", "label": "Major Deliverables", "type": "textarea", "placeholder": "List the major outputs the project must produce."},
@@ -55,8 +92,10 @@
     ]
   },
   "requirements-package": {
-    "title": "Requirements Package / BRD (BA - Elicitation and Analysis)",
+    "title": "Requirements Package / BRD",
+    "role": "BA - Elicitation and Analysis",
     "description": "Captures business, stakeholder, functional, and non-functional requirements in a structured package that can drive solution definition and delivery.",
+    "stageKey": "plan",
     "fields": [
       {"id": "business_requirements", "label": "Business Requirements", "type": "textarea", "placeholder": "What business outcomes, capabilities, or rules are required?"},
       {"id": "stakeholder_requirements", "label": "Stakeholder and User Requirements", "type": "textarea", "placeholder": "What do users, operators, and stakeholders need?"},
@@ -66,8 +105,10 @@
     ]
   },
   "requirements-traceability": {
-    "title": "Requirements Traceability Matrix (BA/PM - Control)",
+    "title": "Requirements Traceability Matrix",
+    "role": "BA/PM - Control",
     "description": "Connects requirements to objectives, design elements, delivery items, test coverage, decisions, and status so scope can be managed end to end.",
+    "stageKey": "design",
     "fields": [
       {"id": "traceability_approach", "label": "Traceability Approach", "type": "textarea", "placeholder": "How will requirements be linked across the lifecycle?"},
       {"id": "requirement_sources", "label": "Requirement Sources", "type": "textarea", "placeholder": "Where do requirements originate and who owns them?"},
@@ -77,8 +118,10 @@
     ]
   },
   "raid-log": {
-    "title": "RAID Log (PM - Delivery Control)",
+    "title": "RAID Log",
+    "role": "PM - Delivery Control",
     "description": "Tracks risks, assumptions, issues, and dependencies that require active monitoring and action during execution.",
+    "stageKey": "execute-control",
     "fields": [
       {"id": "risks", "label": "Key Risks", "type": "textarea", "placeholder": "List the top risks with owners and response strategies."},
       {"id": "assumptions", "label": "Critical Assumptions", "type": "textarea", "placeholder": "Document assumptions that could affect delivery if invalid."},
@@ -88,8 +131,10 @@
     ]
   },
   "change-decision-log": {
-    "title": "Change and Decision Log (PMO - Governance)",
+    "title": "Change and Decision Log",
+    "role": "PMO - Governance",
     "description": "Maintains the record of approved and pending changes, key decisions, rationale, impacts, and follow-through actions.",
+    "stageKey": "governance",
     "fields": [
       {"id": "change_requests", "label": "Change Requests", "type": "textarea", "placeholder": "Describe requested changes, impacts, and current status."},
       {"id": "decision_register", "label": "Decision Register", "type": "textarea", "placeholder": "Capture decisions, dates, approvers, and rationale."},
@@ -99,8 +144,10 @@
     ]
   },
   "architecture-vision": {
-    "title": "Architecture Vision (Architecture - Initiation)",
+    "title": "Architecture Vision",
+    "role": "Architecture - Initiation",
     "description": "Defines the target architectural intent, stakeholder concerns, scope, principles, and the high-level end state the project aims to achieve.",
+    "stageKey": "authorize",
     "fields": [
       {"id": "architecture_problem", "label": "Architecture Problem or Driver", "type": "textarea", "placeholder": "What strategic, business, or technical driver is shaping the architecture effort?"},
       {"id": "stakeholder_concerns", "label": "Stakeholder Concerns", "type": "textarea", "placeholder": "What concerns must the architecture address for sponsors, users, and operators?"},
@@ -110,8 +157,10 @@
     ]
   },
   "architecture-requirements": {
-    "title": "Architecture Requirements Specification (Architecture/BA - Planning)",
+    "title": "Architecture Requirements Specification",
+    "role": "Architecture/BA - Planning",
     "description": "Consolidates architecture-significant requirements, constraints, assumptions, and quality attributes that the solution design must satisfy.",
+    "stageKey": "design",
     "fields": [
       {"id": "quality_attributes", "label": "Quality Attributes", "type": "textarea", "placeholder": "Document availability, resilience, performance, supportability, and similar qualities."},
       {"id": "security_and_compliance", "label": "Security and Compliance Requirements", "type": "textarea", "placeholder": "Capture security, privacy, audit, and regulatory requirements."},
@@ -121,8 +170,10 @@
     ]
   },
   "solution-architecture": {
-    "title": "Solution Architecture Definition (Architecture - Design)",
+    "title": "Solution Architecture Definition",
+    "role": "Architecture - Design",
     "description": "Documents the end-to-end solution structure across business, application, data, integration, and technology viewpoints.",
+    "stageKey": "design",
     "fields": [
       {"id": "solution_context", "label": "Solution Context", "type": "textarea", "placeholder": "Describe the solution context, actors, systems, and boundaries."},
       {"id": "logical_design", "label": "Logical Design Overview", "type": "textarea", "placeholder": "Summarize key components, services, data flows, and responsibilities."},
@@ -132,8 +183,10 @@
     ]
   },
   "transition-migration-plan": {
-    "title": "Transition and Migration Plan (PM/Architecture - Delivery)",
+    "title": "Transition and Migration Plan",
+    "role": "PM/Architecture - Delivery",
     "description": "Defines how the target solution will be implemented, released, adopted, and transitioned into operations with manageable risk.",
+    "stageKey": "validate-transition",
     "fields": [
       {"id": "release_strategy", "label": "Release Strategy", "type": "textarea", "placeholder": "Describe rollout waves, cutover approach, and sequencing."},
       {"id": "migration_dependencies", "label": "Migration Dependencies", "type": "textarea", "placeholder": "What dependencies, prerequisites, and readiness criteria exist?"},
@@ -143,8 +196,10 @@
     ]
   },
   "test-acceptance-plan": {
-    "title": "Test and Acceptance Plan (BA/QA/PM - Validation)",
+    "title": "Test and Acceptance Plan",
+    "role": "BA/QA/PM - Validation",
     "description": "Defines how the team will verify requirements, validate business outcomes, and secure formal stakeholder acceptance.",
+    "stageKey": "validate-transition",
     "fields": [
       {"id": "test_scope", "label": "Test Scope", "type": "textarea", "placeholder": "What will be tested and what will not?"},
       {"id": "test_coverage", "label": "Requirements Coverage", "type": "textarea", "placeholder": "How will business and solution requirements be covered by testing?"},
@@ -154,14 +209,39 @@
     ]
   },
   "closure-lessons-learned": {
-    "title": "Closure Report and Lessons Learned (PMO - Closeout)",
+    "title": "Closure Report and Lessons Learned",
+    "role": "PMO - Closeout",
     "description": "Summarizes delivery outcomes, acceptance, benefits outlook, unresolved items, and lessons to carry into future work.",
+    "stageKey": "close",
     "fields": [
       {"id": "delivery_summary", "label": "Delivery Summary", "type": "textarea", "placeholder": "What was delivered and what remains open or deferred?"},
       {"id": "acceptance_and_handover", "label": "Acceptance and Handover", "type": "textarea", "placeholder": "Document approvals, handover status, and operational ownership."},
       {"id": "benefits_outlook", "label": "Benefits and Outcome Outlook", "type": "textarea", "placeholder": "What benefits are expected now, and how will they be monitored?"},
       {"id": "lessons_learned", "label": "Lessons Learned", "type": "textarea", "placeholder": "What should future teams repeat, change, or avoid?"},
       {"id": "follow_on_actions", "label": "Follow-On Actions", "type": "textarea", "placeholder": "List any post-project actions, owners, and target dates."}
+    ]
+  },
+  "communications-plan": {
+    "version": 1,
+    "title": "Communications Plan",
+    "role": "PM - Communications Planning",
+    "description": "Defines communication objectives, stakeholder audiences, messages, channels, cadence, ownership, and escalation paths.",
+    "category": "Stakeholder Management",
+    "lifecycleStage": "Planning",
+    "stageKey": "plan",
+    "recommended": true,
+    "recommendationMetadata": {
+      "priority": 4,
+      "when": ["stakeholder-complexity", "charter-approved"]
+    },
+    "fields": [
+      {"id": "communication_objectives", "label": "Communication Objectives", "type": "textarea", "required": true, "placeholder": "Define communication objectives."},
+      {"id": "stakeholder_audiences", "label": "Stakeholder Audiences", "type": "textarea", "required": true, "placeholder": "Define stakeholder audiences."},
+      {"id": "key_messages", "label": "Key Messages", "type": "textarea", "required": true, "placeholder": "Define key messages."},
+      {"id": "channels", "label": "Channels", "type": "textarea", "required": true, "placeholder": "Define communication channels."},
+      {"id": "cadence", "label": "Cadence", "type": "textarea", "required": true, "placeholder": "Define communication cadence."},
+      {"id": "owners", "label": "Owners", "type": "textarea", "required": true, "placeholder": "Define communication owners."},
+      {"id": "escalation_paths", "label": "Escalation Paths", "type": "textarea", "required": true, "placeholder": "Define escalation paths."}
     ]
   }
 }

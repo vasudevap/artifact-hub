@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="16" fill="#1e40af"/>
-  <path d="M17 18h30l-4 10H21l-4-10Zm7 15h16l7 13H17l7-13Z" fill="#ffffff"/>
-  <circle cx="32" cy="31" r="4.5" fill="#93c5fd"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-label="ArtifactHub logo">
+  <g fill="#0E6F70" stroke="#0E6F70" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 17V24M24 24L13 33M24 24L35 33" stroke-width="3.5" fill="none"/>
+    <rect x="19" y="5" width="10" height="11" rx="2.4"/>
+    <rect x="20" y="19" width="8" height="8" rx="2"/>
+    <rect x="7" y="31" width="12" height="12" rx="2.8"/>
+    <rect x="29" y="31" width="12" height="12" rx="2.8"/>
+  </g>
 </svg>

@@ -2,10 +2,24 @@ import express from "express";
 import path from "path";
 import { pathToFileURL } from "url";
 import { fileURLToPath } from "url";
-import fs from "fs/promises";
 import crypto from "crypto";
+import { enrichArtifact, enrichProject } from "./artifact-service.js";
+import { config, getFeatureAvailability, normalizeEmail } from "./config.js";
+import {
+  renderArtifactMarkdown as renderVersionedMarkdown,
+  slugifyFilename,
+} from "./export-service.js";
+import { createPhase1Router } from "./phase1-routes.js";
+import {
+  listVersions,
+  recordActivity,
+  recordExport,
+  setProvenance,
+  upsertContextItems,
+} from "./phase1-storage.js";
 import {
   changePasswordForUser,
+  assignArtifactToProject,
   createArtifact,
   createPasswordReset,
   createProject,
@@ -16,6 +30,7 @@ import {
   deleteSessionByToken,
   deleteUserById,
   getProjectByIdAndOwnerId,
+  getArtifactByIdAndOwnerId,
   getStorageHealth,
   getUserById,
   getUserByEmail,
@@ -23,29 +38,21 @@ import {
   initDatabase,
   listUsersForAdmin,
   listProjectsByOwnerId,
+  listUnassignedArtifactsByOwnerId,
   resetPasswordWithToken,
   updateArtifact,
+  updateOwnedArtifact,
 } from "./storage.js";
+import { getTemplate, listTemplates, readTemplateCatalog } from "./template-service.js";
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = config.port;
 
 // Resolve paths for modern ES Modules on macOS
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSION_COOKIE_NAME = "artifacthub_session";
-const ADMIN_EMAILS = new Set(
-  String(process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((email) => normalizeEmail(email))
-    .filter(Boolean),
-);
-
-function normalizeEmail(email) {
-  return String(email || "")
-    .trim()
-    .toLowerCase();
-}
+const ADMIN_EMAILS = config.adminEmails;
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -102,11 +109,7 @@ function clearSessionCookie(res) {
 }
 
 async function readTemplates() {
-  const data = await fs.readFile(
-    path.join(__dirname, "data", "templates.json"),
-    "utf-8",
-  );
-  return JSON.parse(data);
+  return readTemplateCatalog();
 }
 
 function markdownValue(value) {
@@ -114,30 +117,22 @@ function markdownValue(value) {
   return text || "_Not provided._";
 }
 
-function slugifyFilename(value) {
-  return String(value || "artifact")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "artifact";
-}
-
 function renderArtifactMarkdown({ artifact, project, template }) {
   const lines = [
     `# ${artifact.title || template.title || "Artifact"}`,
     "",
-    `Project: ${project.name}`,
+    `Project: ${project?.name || "Unassigned draft"}`,
     `Template: ${template.title || artifact.templateId}`,
     `Status: ${artifact.status}`,
     `Last updated: ${artifact.updatedAt}`,
     "",
   ];
 
-  if (project.sponsor) {
+  if (project?.sponsor) {
     lines.push(`Sponsor: ${project.sponsor}`, "");
   }
 
-  if (project.objective) {
+  if (project?.objective) {
     lines.push("## Project Objective", "", markdownValue(project.objective), "");
   }
 
@@ -191,7 +186,8 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, "dist")));
+app.use(express.static(path.join(__dirname, "public"), { index: false }));
 app.use(express.json());
 
 app.get("/api/health", async (req, res) => {
@@ -241,7 +237,10 @@ app.post("/api/auth/signup", async (req, res) => {
     });
     setSessionCookie(res, session.token);
 
-    res.status(201).json({ user: safeUser(user) });
+    res.status(201).json({
+      user: safeUser(user),
+      features: getFeatureAvailability(user),
+    });
   } catch (error) {
     console.error("Failed to create account.", error);
     res.status(500).json({ error: "Failed to create account." });
@@ -265,7 +264,10 @@ app.post("/api/auth/login", async (req, res) => {
     });
     setSessionCookie(res, session.token);
 
-    res.json({ user: safeUser(user) });
+    res.json({
+      user: safeUser(user),
+      features: getFeatureAvailability(user),
+    });
   } catch (error) {
     console.error("Failed to log in.", error);
     res.status(500).json({ error: "Failed to log in." });
@@ -410,7 +412,10 @@ app.get("/api/auth/me", async (req, res) => {
       return res.status(401).json({ user: null });
     }
 
-    res.json({ user: safeUser(user) });
+    res.json({
+      user: safeUser(user),
+      features: getFeatureAvailability(user),
+    });
   } catch (error) {
     console.error("Failed to fetch current user.", error);
     res.status(500).json({ error: "Failed to fetch current user." });
@@ -456,7 +461,12 @@ app.delete(
 
 app.get("/api/projects", requireAuth, async (req, res) => {
   try {
-    res.json(await listProjectsByOwnerId(req.user.id));
+    const projects = await listProjectsByOwnerId(req.user.id);
+    res.json(
+      await Promise.all(
+        projects.map((project) => enrichProject(project, req.user.id)),
+      ),
+    );
   } catch (error) {
     console.error("Failed to fetch projects.", error);
     res.status(500).json({ error: "Failed to fetch projects." });
@@ -471,6 +481,39 @@ app.post("/api/projects", requireAuth, async (req, res) => {
       sponsor: String(req.body.sponsor || "").trim(),
       objective: String(req.body.objective || "").trim(),
     });
+
+    await upsertContextItems(project.id, req.user.id, [
+      {
+        category: "project-basics",
+        key: "project-name",
+        label: "Project name",
+        value: project.name,
+        trustState: "confirmed",
+        sourceType: "user",
+      },
+      {
+        category: "objectives-outcomes",
+        key: "objective",
+        label: "Project objective",
+        value: project.objective,
+        trustState: project.objective ? "confirmed" : "proposed",
+        sourceType: "user",
+      },
+      {
+        category: "project-basics",
+        key: "sponsor",
+        label: "Project sponsor",
+        value: project.sponsor,
+        trustState: project.sponsor ? "confirmed" : "proposed",
+        sourceType: "user",
+      },
+    ]);
+    await recordActivity(
+      project.id,
+      req.user.id,
+      "project.created",
+      `Created ${project.name}.`,
+    );
 
     res.status(201).json(project);
   } catch (error) {
@@ -508,10 +551,209 @@ app.get("/api/projects/:projectId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Project not found." });
     }
 
-    res.json(project);
+    res.json(await enrichProject(project, req.user.id));
   } catch (error) {
     console.error("Failed to fetch project.", error);
     res.status(500).json({ error: "Failed to fetch project." });
+  }
+});
+
+app.post("/api/artifacts", requireAuth, async (req, res) => {
+  try {
+    const templateId = String(req.body.templateId || "").trim();
+    const template = await getTemplate(templateId);
+    if (!template) {
+      return res.status(404).json({ error: "Template not found." });
+    }
+
+    const artifact = await createArtifact({
+      projectId: null,
+      ownerId: req.user.id,
+      templateId,
+      title: String(req.body.title || template.title || "Untitled Artifact").trim(),
+      fieldValues: req.body.fieldValues || {},
+      templateVersion: template.version,
+    });
+
+    await setProvenance(
+      artifact.id,
+      Object.keys(artifact.fieldValues).map((fieldId) => ({
+        fieldId,
+        sourceType: "user-authored",
+      })),
+    );
+
+    res.status(201).json(await enrichArtifact(null, artifact, req.user.id));
+  } catch (error) {
+    console.error("Failed to create unassigned artifact.", error);
+    res.status(500).json({ error: "Failed to create artifact." });
+  }
+});
+
+app.get("/api/artifacts", requireAuth, async (req, res) => {
+  try {
+    const scope = String(req.query.scope || "unassigned").trim();
+    if (scope !== "unassigned") {
+      return res.status(400).json({ error: "Unsupported artifact scope." });
+    }
+
+    const artifacts = await listUnassignedArtifactsByOwnerId(req.user.id);
+    res.json({
+      artifacts: await Promise.all(
+        artifacts.map((artifact) => enrichArtifact(null, artifact, req.user.id)),
+      ),
+    });
+  } catch (error) {
+    console.error("Failed to list artifacts.", error);
+    res.status(500).json({ error: "Failed to list artifacts." });
+  }
+});
+
+app.get("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
+  try {
+    const artifact = await getArtifactByIdAndOwnerId(
+      req.params.artifactId,
+      req.user.id,
+    );
+
+    if (!artifact) {
+      return res.status(404).json({ error: "Artifact not found." });
+    }
+
+    res.json(await enrichArtifact(artifact.projectId, artifact, req.user.id));
+  } catch (error) {
+    console.error("Failed to fetch artifact.", error);
+    res.status(500).json({ error: "Failed to fetch artifact." });
+  }
+});
+
+app.put("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
+  try {
+    if (req.body.expectedRevision === undefined) {
+      return res.status(400).json({
+        error: "expectedRevision is required.",
+        code: "EXPECTED_REVISION_REQUIRED",
+      });
+    }
+
+    const result = await updateOwnedArtifact({
+      artifactId: req.params.artifactId,
+      ownerId: req.user.id,
+      title: String(req.body.title || "Untitled Artifact").trim(),
+      status: String(req.body.status || "draft").trim(),
+      fieldValues: req.body.fieldValues || {},
+      expectedRevision: req.body.expectedRevision,
+      workflowStage: req.body.workflowStage,
+    });
+
+    if (!result.artifact) {
+      if (result.stale) {
+        return res.status(409).json({
+          error: "The artifact changed in another session.",
+          code: "STALE_ARTIFACT_REVISION",
+          latestArtifact: await enrichArtifact(
+            result.latestArtifact.projectId,
+            result.latestArtifact,
+            req.user.id,
+          ),
+        });
+      }
+      return res.status(404).json({ error: "Artifact not found." });
+    }
+
+    await setProvenance(
+      result.artifact.id,
+      Object.keys(req.body.fieldValues || {}).map((fieldId) => ({
+        fieldId,
+        sourceType: "user-edited",
+      })),
+    );
+
+    res.json(await enrichArtifact(result.artifact.projectId, result.artifact, req.user.id));
+  } catch (error) {
+    console.error("Failed to update artifact.", error);
+    res.status(500).json({ error: "Failed to update artifact." });
+  }
+});
+
+app.post("/api/artifacts/:artifactId/assign", requireAuth, async (req, res) => {
+  try {
+    const projectId = String(req.body.projectId || "").trim();
+    if (!projectId) {
+      return res.status(400).json({ error: "Project is required." });
+    }
+
+    const result = await assignArtifactToProject({
+      artifactId: req.params.artifactId,
+      projectId,
+      ownerId: req.user.id,
+    });
+
+    if (!result.projectFound) {
+      return res.status(404).json({ error: "Project not found." });
+    }
+    if (!result.artifactFound) {
+      return res.status(404).json({ error: "Artifact not found." });
+    }
+    if (result.alreadyAssigned) {
+      return res.status(409).json({ error: "Artifact is already assigned to a project." });
+    }
+
+    await recordActivity(
+      projectId,
+      req.user.id,
+      "artifact.assigned",
+      `Assigned ${result.artifact.title}.`,
+      { artifactId: result.artifact.id, templateId: result.artifact.templateId },
+    );
+
+    res.json({
+      artifact: await enrichArtifact(projectId, result.artifact, req.user.id),
+    });
+  } catch (error) {
+    console.error("Failed to assign artifact.", error);
+    res.status(500).json({ error: "Failed to assign artifact." });
+  }
+});
+
+app.get("/api/artifacts/:artifactId/export.md", requireAuth, async (req, res) => {
+  try {
+    const artifact = await getArtifactByIdAndOwnerId(
+      req.params.artifactId,
+      req.user.id,
+    );
+
+    if (!artifact) {
+      return res.status(404).json({ error: "Artifact not found." });
+    }
+
+    const template = await getTemplate(
+      artifact.templateId,
+      artifact.templateVersion,
+    );
+
+    if (!template) {
+      return res.status(404).json({ error: "Template not found." });
+    }
+
+    const project = artifact.projectId
+      ? await getProjectByIdAndOwnerId(artifact.projectId, req.user.id)
+      : null;
+    const markdown = renderArtifactMarkdown({ artifact, project, template });
+    const filename = `${slugifyFilename(
+      project?.name || "unassigned",
+    )}-${slugifyFilename(artifact.title)}.md`;
+    await recordExport(artifact.id, null, "markdown", req.user.id);
+
+    res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`,
+    );
+    res.send(markdown);
+  } catch (error) {
+    console.error("Failed to export artifact.", error);
+    res.status(500).json({ error: "Failed to export artifact." });
   }
 });
 
@@ -521,19 +763,41 @@ app.post(
   requireAuth,
   async (req, res) => {
     try {
+      const templateId = String(req.body.templateId || "").trim();
+      const template = await getTemplate(templateId);
+      if (!template) {
+        return res.status(404).json({ error: "Template not found." });
+      }
       const artifact = await createArtifact({
         projectId: req.params.projectId,
         ownerId: req.user.id,
-        templateId: String(req.body.templateId || "").trim(),
+        templateId,
         title: String(req.body.title || "Untitled Artifact").trim(),
         fieldValues: req.body.fieldValues || {},
+        templateVersion: template.version,
       });
 
       if (!artifact) {
         return res.status(404).json({ error: "Project not found." });
       }
 
-      res.status(201).json(artifact);
+      await setProvenance(
+        artifact.id,
+        Object.keys(artifact.fieldValues).map((fieldId) => ({
+          fieldId,
+          sourceType: "user-authored",
+        })),
+      );
+      await recordActivity(
+        req.params.projectId,
+        req.user.id,
+        "artifact.created",
+        `Created ${artifact.title}.`,
+        { artifactId: artifact.id, templateId },
+      );
+      res
+        .status(201)
+        .json(await enrichArtifact(req.params.projectId, artifact, req.user.id));
     } catch (error) {
       console.error("Failed to create artifact.", error);
       res.status(500).json({ error: "Failed to create artifact." });
@@ -546,6 +810,13 @@ app.put(
   requireAuth,
   async (req, res) => {
     try {
+      if (req.body.expectedRevision === undefined) {
+        return res.status(400).json({
+          error: "expectedRevision is required.",
+          code: "EXPECTED_REVISION_REQUIRED",
+        });
+      }
+
       const result = await updateArtifact({
         projectId: req.params.projectId,
         artifactId: req.params.artifactId,
@@ -553,6 +824,8 @@ app.put(
         title: String(req.body.title || "Untitled Artifact").trim(),
         status: String(req.body.status || "draft").trim(),
         fieldValues: req.body.fieldValues || {},
+        expectedRevision: req.body.expectedRevision,
+        workflowStage: req.body.workflowStage,
       });
 
       if (!result.projectFound) {
@@ -560,10 +833,34 @@ app.put(
       }
 
       if (!result.artifact) {
+        if (result.stale) {
+          return res.status(409).json({
+            error: "The artifact changed in another session.",
+            code: "STALE_ARTIFACT_REVISION",
+            latestArtifact: await enrichArtifact(
+              req.params.projectId,
+              result.latestArtifact,
+              req.user.id,
+            ),
+          });
+        }
         return res.status(404).json({ error: "Artifact not found." });
       }
 
-      res.json(result.artifact);
+      await setProvenance(
+        result.artifact.id,
+        Object.keys(req.body.fieldValues || {}).map((fieldId) => ({
+          fieldId,
+          sourceType: "user-edited",
+        })),
+      );
+      res.json(
+        await enrichArtifact(
+          req.params.projectId,
+          result.artifact,
+          req.user.id,
+        ),
+      );
     } catch (error) {
       console.error("Failed to update artifact.", error);
       res.status(500).json({ error: "Failed to update artifact." });
@@ -620,17 +917,44 @@ app.get(
         return res.status(404).json({ error: "Artifact not found." });
       }
 
-      const templates = await readTemplates();
-      const template = templates[artifact.templateId];
+      const template = await getTemplate(
+        artifact.templateId,
+        artifact.templateVersion,
+      );
 
       if (!template) {
         return res.status(404).json({ error: "Template not found." });
       }
 
-      const markdown = renderArtifactMarkdown({ artifact, project, template });
+      const versions = await listVersions(
+        req.params.projectId,
+        req.params.artifactId,
+        req.user.id,
+      );
+      const requestedVersion = Number(req.query.version);
+      const version = Number.isInteger(requestedVersion)
+        ? versions.find((item) => item.versionNumber === requestedVersion) || null
+        : versions[0] || null;
+      if (Number.isInteger(requestedVersion) && !version) {
+        return res.status(404).json({ error: "Artifact version not found." });
+      }
+      const exportArtifact = version?.snapshot?.artifact || artifact;
+      const exportTemplate = version?.snapshot?.template || template;
+      const markdown = renderVersionedMarkdown({
+        artifact: exportArtifact,
+        project,
+        template: exportTemplate,
+        version,
+      });
       const filename = `${slugifyFilename(project.name)}-${slugifyFilename(
-        artifact.title,
+        exportArtifact.title,
       )}.md`;
+      await recordExport(
+        artifact.id,
+        version?.id,
+        "markdown",
+        req.user.id,
+      );
 
       res.setHeader("Content-Type", "text/markdown; charset=utf-8");
       res.setHeader(
@@ -648,13 +972,7 @@ app.get(
 // API Route: Fetch clean summaries for navigation sidebar menu construction
 app.get("/api/templates", async (req, res) => {
   try {
-    const templates = await readTemplates();
-    const summary = Object.keys(templates).map((key) => ({
-      id: key,
-      title: templates[key].title,
-      description: templates[key].description,
-    }));
-    res.json(summary);
+    res.json(await listTemplates());
   } catch (error) {
     console.error("Failed to read template definitions.", error);
     res.status(500).json({ error: "Failed to read template definitions." });
@@ -664,8 +982,7 @@ app.get("/api/templates", async (req, res) => {
 // API Route: Fetch functional breakdown fields matrix for selected workspace index canvas
 app.get("/api/templates/:id", async (req, res) => {
   try {
-    const templates = await readTemplates();
-    const template = templates[req.params.id];
+    const template = await getTemplate(req.params.id, req.query.version);
 
     if (!template) {
       return res
@@ -679,6 +996,18 @@ app.get("/api/templates/:id", async (req, res) => {
       .status(500)
       .json({ error: "Failed to fetch template detail structural breakdown." });
   }
+});
+
+app.use("/api", createPhase1Router(requireAuth));
+
+app.get("/{*path}", (req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    return next();
+  }
+
+  res.sendFile(path.join(__dirname, "dist", "index.html"), (error) => {
+    if (error) next();
+  });
 });
 
 async function startServer(port = PORT) {

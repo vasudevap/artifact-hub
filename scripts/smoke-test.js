@@ -14,11 +14,33 @@ async function run() {
   ]);
 
   process.env.DATA_DIR = dataDir;
-  process.env.DATABASE_URL = "";
+  const testDatabaseUrl =
+    process.env.TEST_DATABASE_URL ||
+    (process.env.TEST_POSTGRES === "true"
+      ? [
+          "postgresql://",
+          encodeURIComponent(process.env.PGUSER || ""),
+          ":",
+          encodeURIComponent(process.env.PGPASSWORD || ""),
+          "@",
+          process.env.PGHOST || "localhost",
+          ":",
+          process.env.PGPORT || "5432",
+          "/",
+          process.env.PGDATABASE || "",
+        ].join("")
+      : "");
+  process.env.DATABASE_URL = testDatabaseUrl;
   process.env.NODE_ENV = "test";
   process.env.ADMIN_EMAILS = "admin@example.com";
+  process.env.AI_FEATURE_ENABLED = "true";
+  process.env.AI_BETA_EMAILS = "admin@example.com";
+  process.env.AI_PROVIDER = "fake";
 
   const { app } = await import("../server.js");
+  const { initDatabase, pool } = await import("../storage.js");
+  await initDatabase();
+  await initDatabase();
   const agent = request.agent(app);
   const memberAgent = request.agent(app);
 
@@ -143,7 +165,23 @@ async function run() {
       })
       .expect(200);
 
+    const sessionResponse = await agent.get("/api/auth/me").expect(200);
+    if (
+      !sessionResponse.body.features.aiAssistant ||
+      !sessionResponse.body.features.reviewWorkflow ||
+      !sessionResponse.body.features.docxExport
+    ) {
+      throw new Error("Expected allowlisted account to receive Phase 1 features.");
+    }
+
     await agent.get("/api/projects").expect(200, []);
+
+    const initialGlobalActivityResponse = await agent
+      .get("/api/activity")
+      .expect(200);
+    if (initialGlobalActivityResponse.body.activity.length !== 0) {
+      throw new Error("Expected a new account to have empty global activity.");
+    }
 
     const projectResponse = await agent
       .post("/api/projects")
@@ -164,17 +202,221 @@ async function run() {
       throw new Error("Expected one project after creation.");
     }
 
+    const contextResponse = await agent
+      .get(`/api/projects/${projectResponse.body.id}/context`)
+      .expect(200);
+
+    if (contextResponse.body.items.length !== 3) {
+      throw new Error("Expected project creation to seed reusable context.");
+    }
+
+    const updatedContextResponse = await agent
+      .patch(`/api/projects/${projectResponse.body.id}/context`)
+      .send({
+        items: [
+          {
+            category: "delivery",
+            key: "scope",
+            label: "Scope",
+            value: {
+              inScope: ["Request intake and triage"],
+              outOfScope: ["Downstream delivery tooling"],
+            },
+            trustState: "proposed",
+            sourceType: "user",
+          },
+        ],
+      })
+      .expect(200);
+
+    const scopeItem = updatedContextResponse.body.items.find(
+      (item) => item.key === "scope",
+    );
+    if (!scopeItem) {
+      throw new Error("Expected context update to create a scope item.");
+    }
+
+    await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/context/${scopeItem.id}/confirm`,
+      )
+      .expect(200);
+
     const artifactResponse = await agent
       .post(`/api/projects/${projectResponse.body.id}/artifacts`)
       .send({
         templateId: "project-charter",
         title: "Project Charter",
-        fieldValues: {
-          project_name: "Smoke Project",
-          objective: "Verify export.",
-        },
+        fieldValues: {},
       })
       .expect(201);
+
+    if (
+      artifactResponse.body.templateVersion !== 2 ||
+      artifactResponse.body.revision !== 1
+    ) {
+      throw new Error("Expected a revisioned Project Charter v2 draft.");
+    }
+
+    const conversationResponse = await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/conversations`,
+      )
+      .send({ operation: "interview" })
+      .expect(201);
+
+    if (!conversationResponse.body.id) {
+      throw new Error("Expected assistant conversation to be persisted.");
+    }
+
+    const aiTurnPath = `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/assistant/turns`;
+    const aiTurnResponse = await agent
+      .post(aiTurnPath)
+      .set("Idempotency-Key", "smoke-ai-turn-1")
+      .send({
+        operation: "interview",
+        message: "Create a single governed intake workflow.",
+        expectedRevision: artifactResponse.body.revision,
+      })
+      .expect(200);
+
+    if (
+      aiTurnResponse.body.autoUpdates[0]?.fieldId !== "project_overview" ||
+      aiTurnResponse.body.artifact.revision !== 2
+    ) {
+      throw new Error("Expected fake AI to populate the first empty field.");
+    }
+
+    const duplicateTurnResponse = await agent
+      .post(aiTurnPath)
+      .set("Idempotency-Key", "smoke-ai-turn-1")
+      .send({
+        operation: "interview",
+        message: "This duplicate must not create another update.",
+        expectedRevision: aiTurnResponse.body.artifact.revision,
+      })
+      .expect(200);
+
+    if (
+      duplicateTurnResponse.body.artifact.revision !==
+      aiTurnResponse.body.artifact.revision
+    ) {
+      throw new Error("Expected duplicate idempotency key to reuse the AI run.");
+    }
+
+    await agent
+      .put(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}`,
+      )
+      .send({
+        title: "Project Charter",
+        status: "draft",
+        fieldValues: {},
+      })
+      .expect(400)
+      .expect((response) => {
+        if (response.body.code !== "EXPECTED_REVISION_REQUIRED") {
+          throw new Error("Expected updates to require optimistic revision.");
+        }
+      });
+
+    await agent
+      .put(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}`,
+      )
+      .send({
+        title: "Project Charter",
+        status: "draft",
+        fieldValues: {},
+        expectedRevision: 1,
+      })
+      .expect(409)
+      .expect((response) => {
+        if (response.body.code !== "STALE_ARTIFACT_REVISION") {
+          throw new Error("Expected stale update error code.");
+        }
+      });
+
+    const completeFieldValues = {
+      project_overview: "Create a single governed intake workflow.",
+      objectives: ["Reduce intake cycle time by 30%."],
+      scope: {
+        inScope: ["Request intake and triage"],
+        outOfScope: ["Downstream delivery tooling"],
+      },
+      stakeholders: [
+        {
+          role: "Sponsor",
+          name: "Smoke Sponsor",
+          responsibility: "Approve scope and funding",
+        },
+      ],
+      risks: [
+        {
+          description: "Low adoption",
+          impact: "Benefits are delayed",
+          mitigation: "Pilot with two delivery teams",
+          owner: "Change lead",
+        },
+      ],
+      success_criteria: [
+        "80% of requests use the new workflow within 30 days.",
+      ],
+    };
+
+    const savedArtifactResponse = await agent
+      .put(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}`,
+      )
+      .send({
+        title: "Project Charter",
+        status: "draft",
+        fieldValues: completeFieldValues,
+        expectedRevision: aiTurnResponse.body.artifact.revision,
+        workflowStage: "refining",
+      })
+      .expect(200);
+
+    if (savedArtifactResponse.body.completeness.percentage !== 100) {
+      throw new Error("Expected completed Charter to report 100% completeness.");
+    }
+
+    const reviewResponse = await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/review`,
+      )
+      .expect(200);
+
+    if (reviewResponse.body.findings.length !== 0) {
+      throw new Error("Expected complete deterministic Charter review to pass.");
+    }
+
+    const approvalResponse = await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/approve`,
+      )
+      .expect(200);
+
+    if (approvalResponse.body.version.versionNumber !== 1) {
+      throw new Error("Expected approval to create immutable version 1.");
+    }
+
+    const versionsResponse = await agent
+      .get(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/versions`,
+      )
+      .expect(200);
+
+    if (
+      versionsResponse.body.versions.length !== 1 ||
+      versionsResponse.body.versions[0].snapshot.artifact.fieldValues
+        .project_overview !== completeFieldValues.project_overview ||
+      versionsResponse.body.versions[0].snapshot.approval.versionNumber !== 1
+    ) {
+      throw new Error(
+        "Expected approved version to retain field and approval metadata.",
+      );
+    }
 
     const exportResponse = await agent
       .get(
@@ -186,26 +428,145 @@ async function run() {
       throw new Error("Expected export to include artifact title.");
     }
 
-    if (!exportResponse.text.includes("Verify export.")) {
-      throw new Error("Expected export to include saved field values.");
+    if (
+      !exportResponse.text.includes("Approved version 1") ||
+      !exportResponse.text.includes(completeFieldValues.success_criteria[0])
+    ) {
+      throw new Error("Expected Markdown export to use the approved snapshot.");
+    }
+
+    const docxResponse = await agent
+      .get(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/export.docx`,
+      )
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => callback(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+
+    if (
+      !Buffer.isBuffer(docxResponse.body) ||
+      docxResponse.body.subarray(0, 2).toString() !== "PK"
+    ) {
+      throw new Error("Expected DOCX export to return a valid ZIP package.");
+    }
+
+    await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/reopen`,
+      )
+      .expect(200);
+
+    const versionsAfterReopen = await agent
+      .get(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/versions`,
+      )
+      .expect(200);
+
+    if (versionsAfterReopen.body.versions.length !== 1) {
+      throw new Error("Expected reopening to preserve approved snapshots.");
+    }
+
+    const recommendationResponse = await agent
+      .get(`/api/projects/${projectResponse.body.id}/recommendation`)
+      .expect(200);
+
+    if (!recommendationResponse.body.recommendation?.type) {
+      throw new Error("Expected deterministic project recommendation.");
+    }
+
+    const activityResponse = await agent
+      .get(`/api/projects/${projectResponse.body.id}/activity`)
+      .expect(200);
+
+    if (activityResponse.body.activity.length < 4) {
+      throw new Error("Expected project activity to record key Phase 1 events.");
+    }
+
+    const globalActivityResponse = await agent.get("/api/activity").expect(200);
+    const globalActivity = globalActivityResponse.body.activity;
+    if (globalActivity.length < activityResponse.body.activity.length) {
+      throw new Error("Expected global activity to include project activity.");
+    }
+    if (!globalActivity.every((item) => item.projectName === "Smoke Project")) {
+      throw new Error("Expected global activity to include project names.");
+    }
+    if (
+      !globalActivity.some(
+        (item) =>
+          item.eventType === "project.created" &&
+          item.targetHref === `/projects/${projectResponse.body.id}`,
+      )
+    ) {
+      throw new Error("Expected global activity to link project events.");
+    }
+    if (
+      !globalActivity.some(
+        (item) =>
+          item.eventType === "artifact.created" &&
+          item.targetHref ===
+            `/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}`,
+      )
+    ) {
+      throw new Error("Expected global activity to link artifact events.");
+    }
+
+    const outsiderAgent = request.agent(app);
+    await outsiderAgent
+      .post("/api/auth/signup")
+      .send({
+        name: "Outside Owner",
+        email: `outside-${Date.now()}@example.com`,
+        password: "outsidepass123",
+      })
+      .expect(201);
+    await outsiderAgent
+      .get(`/api/projects/${projectResponse.body.id}/context`)
+      .expect(404);
+    await outsiderAgent
+      .get(
+        `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/versions`,
+      )
+      .expect(404);
+    const outsiderActivityResponse = await outsiderAgent.get("/api/activity");
+    if (outsiderActivityResponse.status !== 200) {
+      throw new Error(
+        `Expected outsider global activity to load, got ${outsiderActivityResponse.status}: ${JSON.stringify(outsiderActivityResponse.body)}`,
+      );
+    }
+    if (outsiderActivityResponse.body.activity.length !== 0) {
+      throw new Error("Expected global activity to stay owner-scoped.");
     }
 
     const templatesResponse = await request(app).get("/api/templates").expect(200);
 
-    if (templatesResponse.body.length === 0) {
-      throw new Error("Expected template list to be populated.");
+    if (
+      !templatesResponse.body.some(
+        (template) => template.id === "communications-plan",
+      )
+    ) {
+      throw new Error("Expected versioned catalog to include Communications Plan.");
     }
 
     const templateResponse = await request(app)
       .get("/api/templates/project-charter")
       .expect(200);
 
-    if (!Array.isArray(templateResponse.body.fields)) {
-      throw new Error("Expected template detail to include fields.");
+    if (
+      templateResponse.body.version !== 2 ||
+      !Array.isArray(templateResponse.body.fields)
+    ) {
+      throw new Error("Expected current Project Charter v2 template detail.");
     }
 
     console.log("Smoke test passed.");
   } finally {
+    if (pool) {
+      await pool.end();
+    }
     await rm(dataDir, { force: true, recursive: true });
   }
 }

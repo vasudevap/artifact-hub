@@ -4,12 +4,18 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
+    "build": "tsc --noEmit && vite build",
     "check:public": "node scripts/check-public-boundary.js",
+    "dev": "vite",
     "migrate:json-to-db": "node scripts/migrate-json-to-postgres.js",
+    "preview": "vite preview",
     "seed:demo": "node scripts/seed-demo.js",
     "setup:hooks": "git config core.hooksPath .githooks",
     "smoke": "node scripts/smoke-test.js",
-    "test": "npm run smoke",
+    "test:postgres": "node scripts/smoke-test.js",
+    "test": "npm run build && npm run test:unit && npm run smoke",
+    "test:e2e": "node scripts/browser-e2e.js",
+    "test:unit": "vitest run",
     "start": "node server.js"
   },
   "keywords": [],
@@ -17,10 +23,31 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@hookform/resolvers": "^5.4.0",
+    "@tanstack/react-query": "^5.101.0",
+    "docx": "^9.7.1",
     "express": "^5.2.1",
-    "pg": "^8.21.0"
+    "openai": "^6.42.0",
+    "pg": "^8.21.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-hook-form": "^7.77.0",
+    "react-router-dom": "^7.17.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "supertest": "^7.2.2"
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^25.9.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.60.0",
+    "supertest": "^7.2.2",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
   }
 }

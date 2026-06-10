@@ -11,11 +11,23 @@ const allowedRootFiles = new Set([
   ".env.example",
   ".gitignore",
   "README.md",
+  "ai-service.js",
+  "artifact-service.js",
+  "config.js",
+  "export-service.js",
+  "index.html",
+  "migrations.js",
   "package-lock.json",
   "package.json",
+  "phase1-routes.js",
+  "phase1-storage.js",
   "render.yaml",
+  "review-service.js",
   "server.js",
   "storage.js",
+  "template-service.js",
+  "tsconfig.json",
+  "vite.config.ts",
 ]);
 const allowedRootDirectories = new Set([
   ".github",
@@ -24,6 +36,8 @@ const allowedRootDirectories = new Set([
   "db",
   "public",
   "scripts",
+  "src",
+  "tests",
 ]);
 const textExtensions = new Set([
   ".css",
@@ -33,6 +47,8 @@ const textExtensions = new Set([
   ".md",
   ".sql",
   ".svg",
+  ".ts",
+  ".tsx",
   ".yaml",
   ".yml",
 ]);
@@ -56,7 +72,12 @@ function getCandidatePaths() {
     return tracked;
   }
 
-  return tracked.filter((filePath) => existsSync(path.join(repoRoot, filePath)));
+  const untracked = splitNullTerminated(
+    runGit(["ls-files", "-z", "--others", "--exclude-standard"]),
+  );
+  return [...new Set([...tracked, ...untracked])].filter((filePath) =>
+    existsSync(path.join(repoRoot, filePath)),
+  );
 }
 
 function readCandidate(filePath) {

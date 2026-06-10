@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import crypto from "crypto";
 import pg from "pg";
+import { runMigrations } from "./migrations.js";
 
 const { Pool } = pg;
 
@@ -13,7 +14,9 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
 const PROJECTS_FILE = path.join(DATA_DIR, "projects.json");
+const ARTIFACTS_FILE = path.join(DATA_DIR, "artifacts.json");
 const PASSWORD_RESETS_FILE = path.join(DATA_DIR, "password-resets.json");
+const PHASE1_FILE = path.join(DATA_DIR, "phase1.json");
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const USE_DATABASE = Boolean(DATABASE_URL);
@@ -48,12 +51,19 @@ async function writeJsonFile(filePath, data) {
 function mapArtifact(row) {
   return {
     id: row.id,
-    templateId: row.template_id,
+    ownerId: row.owner_id ?? row.ownerId ?? null,
+    projectId: row.project_id ?? row.projectId ?? null,
+    projectName: row.project_name ?? row.projectName ?? null,
+    templateVersionId: row.template_version_id ?? row.templateVersionId ?? null,
+    templateId: row.template_id ?? row.templateId,
     title: row.title,
     status: row.status,
-    fieldValues: row.field_values || {},
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    fieldValues: row.field_values ?? row.fieldValues ?? {},
+    revision: Number(row.revision) || 1,
+    templateVersion: Number(row.template_version ?? row.templateVersion) || 1,
+    workflowStage: row.workflow_stage ?? row.workflowStage ?? "drafting",
+    createdAt: row.created_at ?? row.createdAt,
+    updatedAt: row.updated_at ?? row.updatedAt,
   };
 }
 
@@ -71,8 +81,37 @@ function mapProject(row, artifacts = []) {
   };
 }
 
+function normalizeLocalArtifact(artifact, project) {
+  return {
+    ...artifact,
+    ownerId: artifact.ownerId || project?.ownerId || null,
+    projectId: artifact.projectId ?? project?.id ?? null,
+    projectName: artifact.projectName ?? project?.name ?? null,
+    revision: Number(artifact.revision) || 1,
+    templateVersion: Number(artifact.templateVersion) || 1,
+    workflowStage: artifact.workflowStage || "drafting",
+  };
+}
+
+function normalizeLocalProject(project) {
+  if (!project) {
+    return null;
+  }
+
+  return {
+    ...project,
+    artifacts: (project.artifacts || []).map((artifact) =>
+      normalizeLocalArtifact(artifact, project),
+    ),
+  };
+}
+
 function createId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function templateVersionIdFor(templateId, templateVersion = 1) {
+  return `${templateId}:v${Number(templateVersion) || 1}`;
 }
 
 function nowIso() {
@@ -88,60 +127,7 @@ async function initDatabase() {
     return;
   }
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token TEXT NOT NULL UNIQUE,
-      created_at TIMESTAMPTZ NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS password_resets (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash TEXT NOT NULL UNIQUE,
-      expires_at TIMESTAMPTZ NOT NULL,
-      used_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      sponsor TEXT NOT NULL DEFAULT '',
-      objective TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS artifacts (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      template_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      status TEXT NOT NULL,
-      field_values JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-    CREATE INDEX IF NOT EXISTS idx_password_resets_token_hash ON password_resets(token_hash);
-    CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
-    CREATE INDEX IF NOT EXISTS idx_projects_owner_id ON projects(owner_id);
-    CREATE INDEX IF NOT EXISTS idx_artifacts_project_id ON artifacts(project_id);
-  `);
+  await runMigrations(pool);
 }
 
 async function getStorageHealth() {
@@ -163,7 +149,9 @@ async function getStorageHealth() {
 async function listProjectsByOwnerId(ownerId) {
   if (!USE_DATABASE) {
     const projects = await readJsonFile(PROJECTS_FILE, []);
-    return projects.filter((project) => project.ownerId === ownerId);
+    return projects
+      .filter((project) => project.ownerId === ownerId)
+      .map(normalizeLocalProject);
   }
 
   const projectResult = await pool.query(
@@ -199,10 +187,10 @@ async function listProjectsByOwnerId(ownerId) {
 async function getProjectByIdAndOwnerId(projectId, ownerId) {
   if (!USE_DATABASE) {
     const projects = await readJsonFile(PROJECTS_FILE, []);
-    return (
+    return normalizeLocalProject(
       projects.find(
         (project) => project.id === projectId && project.ownerId === ownerId,
-      ) || null
+      ) || null,
     );
   }
 
@@ -231,6 +219,29 @@ async function getProjectByIdAndOwnerId(projectId, ownerId) {
     row,
     artifactResult.rows.map((artifactRow) => mapArtifact(artifactRow)),
   );
+}
+
+async function listUnassignedArtifactsByOwnerId(ownerId) {
+  if (!USE_DATABASE) {
+    const artifacts = await readJsonFile(ARTIFACTS_FILE, []);
+    return artifacts
+      .filter((artifact) => artifact.ownerId === ownerId && !artifact.projectId)
+      .map((artifact) => normalizeLocalArtifact(artifact))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+
+  const result = await pool.query(
+    `SELECT a.*, p.name AS project_name
+     FROM artifacts a
+     LEFT JOIN projects p ON p.id = a.project_id
+     WHERE a.owner_id = $1
+       AND a.project_id IS NULL
+       AND a.archived_at IS NULL
+     ORDER BY a.updated_at DESC`,
+    [ownerId],
+  );
+
+  return result.rows.map(mapArtifact);
 }
 
 async function createProject({ ownerId, name, sponsor, objective }) {
@@ -297,43 +308,70 @@ async function deleteProjectByIdAndOwnerId(projectId, ownerId) {
   return result.rowCount > 0;
 }
 
-async function createArtifact({ projectId, ownerId, templateId, title, fieldValues }) {
+async function createArtifact({
+  projectId,
+  ownerId,
+  templateId,
+  title,
+  fieldValues,
+  templateVersion = 1,
+}) {
   const timestamp = nowIso();
   const artifact = {
     id: createId("artifact"),
+    ownerId,
+    projectId: projectId || null,
+    projectName: null,
+    templateVersionId: templateVersionIdFor(templateId, templateVersion),
     templateId,
     title,
     status: "draft",
     fieldValues,
+    revision: 1,
+    templateVersion,
+    workflowStage: "drafting",
     createdAt: timestamp,
     updatedAt: timestamp,
   };
 
   if (!USE_DATABASE) {
+    if (!projectId) {
+      const artifacts = await readJsonFile(ARTIFACTS_FILE, []);
+      artifacts.unshift(artifact);
+      await writeJsonFile(ARTIFACTS_FILE, artifacts);
+      return artifact;
+    }
+
     const projects = await readJsonFile(PROJECTS_FILE, []);
     const project = projects.find(
       (item) => item.id === projectId && item.ownerId === ownerId,
     );
-
     if (!project) {
       return null;
     }
 
+    artifact.projectName = project.name;
     project.artifacts.unshift(artifact);
     project.updatedAt = timestamp;
     await writeJsonFile(PROJECTS_FILE, projects);
     return artifact;
   }
 
-  const ownership = await pool.query(
-    `SELECT id
-     FROM projects
-     WHERE id = $1 AND owner_id = $2`,
-    [projectId, ownerId],
-  );
+  let projectName = null;
 
-  if (!ownership.rows[0]) {
-    return null;
+  if (projectId) {
+    const ownership = await pool.query(
+      `SELECT id, name
+       FROM projects
+       WHERE id = $1 AND owner_id = $2`,
+      [projectId, ownerId],
+    );
+
+    if (!ownership.rows[0]) {
+      return null;
+    }
+    projectName = ownership.rows[0].name;
+    artifact.projectName = projectName;
   }
 
   const client = await pool.connect();
@@ -341,19 +379,321 @@ async function createArtifact({ projectId, ownerId, templateId, title, fieldValu
   try {
     await client.query("BEGIN");
     await client.query(
-      `INSERT INTO artifacts (id, project_id, template_id, title, status, field_values, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+      `INSERT INTO artifacts (
+         id, owner_id, project_id, template_version_id, template_id, title,
+         status, field_values, revision, template_version, workflow_stage,
+         assigned_at, created_at, updated_at
+       )
+       VALUES (
+         $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13, $14
+       )`,
       [
         artifact.id,
-        projectId,
+        ownerId,
+        projectId || null,
+        artifact.templateVersionId,
         artifact.templateId,
         artifact.title,
         artifact.status,
         JSON.stringify(artifact.fieldValues),
+        artifact.revision,
+        artifact.templateVersion,
+        artifact.workflowStage,
+        projectId ? timestamp : null,
         artifact.createdAt,
         artifact.updatedAt,
       ],
     );
+    if (projectId) {
+      await client.query(
+        `UPDATE projects
+         SET updated_at = $2
+         WHERE id = $1`,
+        [projectId, timestamp],
+      );
+    }
+    await client.query("COMMIT");
+    return { ...artifact, projectName };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getArtifactByIdAndOwnerId(artifactId, ownerId) {
+  if (!USE_DATABASE) {
+    const [projects, artifacts] = await Promise.all([
+      readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(ARTIFACTS_FILE, []),
+    ]);
+    const unassigned = artifacts.find(
+      (artifact) => artifact.id === artifactId && artifact.ownerId === ownerId,
+    );
+    if (unassigned) return normalizeLocalArtifact(unassigned);
+
+    for (const project of projects.filter((item) => item.ownerId === ownerId)) {
+      const artifact = (project.artifacts || []).find(
+        (item) => item.id === artifactId,
+      );
+      if (artifact) return normalizeLocalArtifact(artifact, project);
+    }
+    return null;
+  }
+
+  const result = await pool.query(
+    `SELECT a.*, p.name AS project_name
+     FROM artifacts a
+     LEFT JOIN projects p ON p.id = a.project_id
+     WHERE a.id = $1 AND a.owner_id = $2`,
+    [artifactId, ownerId],
+  );
+
+  return result.rows[0] ? mapArtifact(result.rows[0]) : null;
+}
+
+async function updateOwnedArtifact({
+  artifactId,
+  ownerId,
+  title,
+  status,
+  fieldValues,
+  expectedRevision,
+  workflowStage,
+}) {
+  if (!USE_DATABASE) {
+    const [projects, artifacts] = await Promise.all([
+      readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(ARTIFACTS_FILE, []),
+    ]);
+    let targetArtifact = artifacts.find(
+      (item) => item.id === artifactId && item.ownerId === ownerId,
+    );
+    let targetProject = null;
+    let unassigned = Boolean(targetArtifact);
+
+    if (!targetArtifact) {
+      for (const project of projects.filter((item) => item.ownerId === ownerId)) {
+        const artifact = (project.artifacts || []).find(
+          (item) => item.id === artifactId,
+        );
+        if (artifact) {
+          targetArtifact = artifact;
+          targetProject = project;
+          unassigned = false;
+          break;
+        }
+      }
+    }
+
+    if (!targetArtifact) return { artifact: null };
+
+    const currentRevision = Number(targetArtifact.revision) || 1;
+    if (
+      expectedRevision !== undefined &&
+      Number(expectedRevision) !== currentRevision
+    ) {
+      return {
+        artifact: null,
+        stale: true,
+        latestArtifact: normalizeLocalArtifact(targetArtifact, targetProject),
+      };
+    }
+
+    const timestamp = nowIso();
+    targetArtifact.title = title;
+    targetArtifact.status = status;
+    targetArtifact.fieldValues = fieldValues;
+    targetArtifact.revision = currentRevision + 1;
+    targetArtifact.templateVersion = Number(targetArtifact.templateVersion) || 1;
+    targetArtifact.workflowStage =
+      workflowStage || targetArtifact.workflowStage || "drafting";
+    targetArtifact.updatedAt = timestamp;
+    if (targetProject) targetProject.updatedAt = timestamp;
+
+    await Promise.all([
+      unassigned ? writeJsonFile(ARTIFACTS_FILE, artifacts) : Promise.resolve(),
+      targetProject ? writeJsonFile(PROJECTS_FILE, projects) : Promise.resolve(),
+    ]);
+
+    return {
+      artifact: normalizeLocalArtifact(targetArtifact, targetProject),
+    };
+  }
+
+  const timestamp = nowIso();
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `UPDATE artifacts
+       SET title = $3,
+           status = $4,
+           field_values = $5::jsonb,
+           workflow_stage = COALESCE($6, workflow_stage),
+           revision = revision + 1,
+           updated_at = $7
+       WHERE id = $1
+         AND owner_id = $2
+         AND ($8::integer IS NULL OR revision = $8)
+       RETURNING *`,
+      [
+        artifactId,
+        ownerId,
+        title,
+        status,
+        JSON.stringify(fieldValues),
+        workflowStage || null,
+        timestamp,
+        expectedRevision === undefined ? null : Number(expectedRevision),
+      ],
+    );
+
+    if (!result.rows[0]) {
+      const latestResult = await client.query(
+        `SELECT a.*, p.name AS project_name
+         FROM artifacts a
+         LEFT JOIN projects p ON p.id = a.project_id
+         WHERE a.id = $1 AND a.owner_id = $2`,
+        [artifactId, ownerId],
+      );
+      await client.query("ROLLBACK");
+      return latestResult.rows[0]
+        ? {
+            artifact: null,
+            stale: true,
+            latestArtifact: mapArtifact(latestResult.rows[0]),
+          }
+        : { artifact: null };
+    }
+
+    if (result.rows[0].project_id) {
+      await client.query(
+        `UPDATE projects
+         SET updated_at = $2
+         WHERE id = $1`,
+        [result.rows[0].project_id, timestamp],
+      );
+    }
+
+    await client.query("COMMIT");
+    return { artifact: mapArtifact(result.rows[0]) };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function assignArtifactToProject({ artifactId, projectId, ownerId }) {
+  if (!USE_DATABASE) {
+    const [projects, artifacts] = await Promise.all([
+      readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(ARTIFACTS_FILE, []),
+    ]);
+    const project = projects.find(
+      (item) => item.id === projectId && item.ownerId === ownerId,
+    );
+    if (!project) {
+      return { projectFound: false, artifactFound: false, artifact: null };
+    }
+
+    const artifactIndex = artifacts.findIndex(
+      (item) => item.id === artifactId && item.ownerId === ownerId,
+    );
+    if (artifactIndex < 0) {
+      const assignedProject = projects.find(
+        (item) =>
+          item.ownerId === ownerId &&
+          (item.artifacts || []).some((artifact) => artifact.id === artifactId),
+      );
+      const assignedArtifact = assignedProject?.artifacts.find(
+        (artifact) => artifact.id === artifactId,
+      );
+      return assignedArtifact
+        ? {
+            projectFound: true,
+            artifactFound: true,
+            alreadyAssigned: true,
+            artifact: normalizeLocalArtifact(assignedArtifact, assignedProject),
+            project: assignedProject,
+          }
+        : { projectFound: true, artifactFound: false, artifact: null };
+    }
+
+    const timestamp = nowIso();
+    const [artifact] = artifacts.splice(artifactIndex, 1);
+    artifact.projectId = project.id;
+    artifact.projectName = project.name;
+    artifact.revision = (Number(artifact.revision) || 1) + 1;
+    artifact.updatedAt = timestamp;
+    project.artifacts = project.artifacts || [];
+    project.artifacts.unshift(artifact);
+    project.updatedAt = timestamp;
+    await Promise.all([
+      writeJsonFile(ARTIFACTS_FILE, artifacts),
+      writeJsonFile(PROJECTS_FILE, projects),
+    ]);
+    return {
+      projectFound: true,
+      artifactFound: true,
+      artifact: normalizeLocalArtifact(artifact, project),
+      project,
+    };
+  }
+
+  const client = await pool.connect();
+  const timestamp = nowIso();
+
+  try {
+    await client.query("BEGIN");
+    const projectResult = await client.query(
+      `SELECT *
+       FROM projects
+       WHERE id = $1 AND owner_id = $2`,
+      [projectId, ownerId],
+    );
+    const project = projectResult.rows[0];
+    if (!project) {
+      await client.query("ROLLBACK");
+      return { projectFound: false, artifactFound: false, artifact: null };
+    }
+
+    const result = await client.query(
+      `UPDATE artifacts
+       SET project_id = $3,
+           assigned_at = COALESCE(assigned_at, $4),
+           revision = revision + 1,
+           updated_at = $4
+       WHERE id = $1
+         AND owner_id = $2
+         AND project_id IS NULL
+       RETURNING *`,
+      [artifactId, ownerId, projectId, timestamp],
+    );
+
+    if (!result.rows[0]) {
+      const existing = await client.query(
+        `SELECT a.*, p.name AS project_name
+         FROM artifacts a
+         LEFT JOIN projects p ON p.id = a.project_id
+         WHERE a.id = $1 AND a.owner_id = $2`,
+        [artifactId, ownerId],
+      );
+      await client.query("ROLLBACK");
+      return existing.rows[0]
+        ? {
+            projectFound: true,
+            artifactFound: true,
+            alreadyAssigned: Boolean(existing.rows[0].project_id),
+            artifact: mapArtifact(existing.rows[0]),
+          }
+        : { projectFound: true, artifactFound: false, artifact: null };
+    }
+
     await client.query(
       `UPDATE projects
        SET updated_at = $2
@@ -361,7 +701,16 @@ async function createArtifact({ projectId, ownerId, templateId, title, fieldValu
       [projectId, timestamp],
     );
     await client.query("COMMIT");
-    return artifact;
+
+    return {
+      projectFound: true,
+      artifactFound: true,
+      artifact: mapArtifact({
+        ...result.rows[0],
+        project_name: project.name,
+      }),
+      project: mapProject(project, []),
+    };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -377,6 +726,8 @@ async function updateArtifact({
   title,
   status,
   fieldValues,
+  expectedRevision,
+  workflowStage,
 }) {
   if (!USE_DATABASE) {
     const projects = await readJsonFile(PROJECTS_FILE, []);
@@ -394,9 +745,31 @@ async function updateArtifact({
       return { projectFound: true, artifact: null };
     }
 
+    const currentRevision = Number(artifact.revision) || 1;
+
+    if (
+      expectedRevision !== undefined &&
+      Number(expectedRevision) !== currentRevision
+    ) {
+      return {
+        projectFound: true,
+        artifact: null,
+        stale: true,
+        latestArtifact: {
+          ...artifact,
+          revision: currentRevision,
+          templateVersion: Number(artifact.templateVersion) || 1,
+          workflowStage: artifact.workflowStage || "drafting",
+        },
+      };
+    }
+
     artifact.title = title;
     artifact.status = status;
     artifact.fieldValues = fieldValues;
+    artifact.revision = currentRevision + 1;
+    artifact.templateVersion = Number(artifact.templateVersion) || 1;
+    artifact.workflowStage = workflowStage || artifact.workflowStage || "drafting";
     artifact.updatedAt = nowIso();
     project.updatedAt = artifact.updatedAt;
     await writeJsonFile(PROJECTS_FILE, projects);
@@ -424,8 +797,12 @@ async function updateArtifact({
        SET title = $3,
            status = $4,
            field_values = $5::jsonb,
-           updated_at = $6
-       WHERE id = $1 AND project_id = $2
+           workflow_stage = COALESCE($6, workflow_stage),
+           revision = revision + 1,
+           updated_at = $7
+       WHERE id = $1
+         AND project_id = $2
+         AND ($8::integer IS NULL OR revision = $8)
        RETURNING *`,
       [
         artifactId,
@@ -433,13 +810,28 @@ async function updateArtifact({
         title,
         status,
         JSON.stringify(fieldValues),
+        workflowStage || null,
         timestamp,
+        expectedRevision === undefined ? null : Number(expectedRevision),
       ],
     );
 
     if (!result.rows[0]) {
+      const latestResult = await client.query(
+        `SELECT *
+         FROM artifacts
+         WHERE id = $1 AND project_id = $2`,
+        [artifactId, projectId],
+      );
       await client.query("ROLLBACK");
-      return { projectFound: true, artifact: null };
+      return latestResult.rows[0]
+        ? {
+            projectFound: true,
+            artifact: null,
+            stale: true,
+            latestArtifact: mapArtifact(latestResult.rows[0]),
+          }
+        : { projectFound: true, artifact: null };
     }
 
     await client.query(
@@ -567,6 +959,8 @@ async function getUserById(userId) {
 }
 
 async function getUserBySessionToken(token) {
+  const tokenHash = hashToken(token);
+
   if (!USE_DATABASE) {
     const [sessions, users] = await Promise.all([
       readJsonFile(SESSIONS_FILE, []),
@@ -591,8 +985,9 @@ async function getUserBySessionToken(token) {
        u.updated_at AS "updatedAt"
      FROM sessions s
      INNER JOIN users u ON u.id = s.user_id
-     WHERE s.token = $1`,
-    [token],
+     WHERE s.token_hash = $1
+        OR s.token = $2`,
+    [tokenHash, token],
   );
 
   return result.rows[0] || null;
@@ -600,14 +995,18 @@ async function getUserBySessionToken(token) {
 
 async function listUsersForAdmin() {
   if (!USE_DATABASE) {
-    const [users, projects] = await Promise.all([
+    const [users, projects, unassignedArtifacts] = await Promise.all([
       readJsonFile(USERS_FILE, []),
       readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(ARTIFACTS_FILE, []),
     ]);
 
     return users
       .map((user) => {
         const ownedProjects = projects.filter((project) => project.ownerId === user.id);
+        const ownedUnassigned = unassignedArtifacts.filter(
+          (artifact) => artifact.ownerId === user.id,
+        );
         return {
           id: user.id,
           name: user.name,
@@ -615,10 +1014,12 @@ async function listUsersForAdmin() {
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
           projectCount: ownedProjects.length,
-          artifactCount: ownedProjects.reduce(
-            (count, project) => count + project.artifacts.length,
-            0,
-          ),
+          artifactCount:
+            ownedUnassigned.length +
+            ownedProjects.reduce(
+              (count, project) => count + project.artifacts.length,
+              0,
+            ),
         };
       })
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -632,10 +1033,10 @@ async function listUsersForAdmin() {
        u.created_at AS "createdAt",
        u.updated_at AS "updatedAt",
        COUNT(DISTINCT p.id)::int AS "projectCount",
-       COUNT(a.id)::int AS "artifactCount"
+       COUNT(DISTINCT a.id)::int AS "artifactCount"
      FROM users u
      LEFT JOIN projects p ON p.owner_id = u.id
-     LEFT JOIN artifacts a ON a.project_id = p.id
+     LEFT JOIN artifacts a ON a.owner_id = u.id
      GROUP BY u.id
      ORDER BY u.created_at DESC`,
   );
@@ -682,6 +1083,7 @@ async function createSession({ userId, token }) {
     id: createId("session"),
     userId,
     token,
+    tokenHash: hashToken(token),
     createdAt: nowIso(),
   };
 
@@ -693,9 +1095,15 @@ async function createSession({ userId, token }) {
   }
 
   await pool.query(
-    `INSERT INTO sessions (id, user_id, token, created_at)
-     VALUES ($1, $2, $3, $4)`,
-    [session.id, session.userId, session.token, session.createdAt],
+    `INSERT INTO sessions (id, user_id, token, token_hash, created_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [
+      session.id,
+      session.userId,
+      session.token,
+      session.tokenHash,
+      session.createdAt,
+    ],
   );
 
   return session;
@@ -887,10 +1295,11 @@ async function changePasswordForUser({ userId, passwordHash }) {
 
 async function deleteUserById(userId) {
   if (!USE_DATABASE) {
-    const [users, sessions, projects, resets] = await Promise.all([
+    const [users, sessions, projects, artifacts, resets] = await Promise.all([
       readJsonFile(USERS_FILE, []),
       readJsonFile(SESSIONS_FILE, []),
       readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(ARTIFACTS_FILE, []),
       readJsonFile(PASSWORD_RESETS_FILE, []),
     ]);
     const exists = users.some((user) => user.id === userId);
@@ -913,6 +1322,10 @@ async function deleteUserById(userId) {
         projects.filter((project) => project.ownerId !== userId),
       ),
       writeJsonFile(
+        ARTIFACTS_FILE,
+        artifacts.filter((artifact) => artifact.ownerId !== userId),
+      ),
+      writeJsonFile(
         PASSWORD_RESETS_FILE,
         resets.filter((reset) => reset.userId !== userId),
       ),
@@ -931,6 +1344,8 @@ async function deleteUserById(userId) {
 }
 
 async function deleteSessionByToken(token) {
+  const tokenHash = hashToken(token);
+
   if (!USE_DATABASE) {
     const sessions = await readJsonFile(SESSIONS_FILE, []);
     const remainingSessions = sessions.filter((session) => session.token !== token);
@@ -940,13 +1355,16 @@ async function deleteSessionByToken(token) {
 
   await pool.query(
     `DELETE FROM sessions
-     WHERE token = $1`,
-    [token],
+     WHERE token_hash = $1
+        OR token = $2`,
+    [tokenHash, token],
   );
 }
 
 export {
   USE_DATABASE,
+  ARTIFACTS_FILE,
+  assignArtifactToProject,
   createArtifact,
   changePasswordForUser,
   createProject,
@@ -958,6 +1376,7 @@ export {
   deleteUserById,
   deleteSessionByToken,
   getProjectByIdAndOwnerId,
+  getArtifactByIdAndOwnerId,
   getStorageHealth,
   getUserById,
   getUserByEmail,
@@ -965,16 +1384,19 @@ export {
   initDatabase,
   listUsersForAdmin,
   listProjectsByOwnerId,
+  listUnassignedArtifactsByOwnerId,
   mapArtifact,
   mapProject,
   pool,
   readJsonFile,
   resetPasswordWithToken,
   updateArtifact,
+  updateOwnedArtifact,
   DATA_DIR,
   USERS_FILE,
   SESSIONS_FILE,
   PROJECTS_FILE,
   PASSWORD_RESETS_FILE,
+  PHASE1_FILE,
   writeJsonFile,
 };

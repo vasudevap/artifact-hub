@@ -12,6 +12,20 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: artifact_hub_test
+          POSTGRES_USER: artifact_hub
+          POSTGRES_PASSWORD: artifact_hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U artifact_hub -d artifact_hub_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -30,3 +44,19 @@ jobs:
 
       - name: Run smoke tests
         run: npm test
+
+      - name: Install browser runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser end-to-end flow
+        run: npm run test:e2e
+
+      - name: Run PostgreSQL integration flow
+        run: npm run test:postgres
+        env:
+          TEST_POSTGRES: "true"
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGDATABASE: artifact_hub_test
+          PGUSER: artifact_hub
+          PGPASSWORD: artifact_hub
