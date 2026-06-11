@@ -105,11 +105,65 @@ async function run() {
     );
     assert.equal(await page.getByText("Chris Grafley").count(), 0);
     await page.setViewportSize({ width: 390, height: 844 });
-    const aboutDimensions = await page.evaluate(() => ({
-      clientWidth: document.body.clientWidth,
-      scrollWidth: document.body.scrollWidth,
-    }));
+    const aboutDimensions = await page.evaluate(() => {
+      const rail = document.querySelector(".global-rail");
+      const mobileHeader = document.querySelector(".mobile-header");
+      const railLinks = Array.from(
+        document.querySelectorAll(".global-rail .rail-link"),
+      );
+
+      return {
+        clientWidth: document.body.clientWidth,
+        scrollWidth: document.body.scrollWidth,
+        railDisplay: getComputedStyle(rail).display,
+        railRect: {
+          right: Math.round(rail.getBoundingClientRect().right),
+        },
+        mobileHeaderDisplay: getComputedStyle(mobileHeader).display,
+        profileRect: {
+          right: Math.round(
+            document.querySelector(".rail-profile").getBoundingClientRect().right,
+          ),
+        },
+        logoutRect: {
+          right: Math.round(
+            document.querySelector(".rail-logout").getBoundingClientRect().right,
+          ),
+        },
+        railLinkCount: railLinks.length,
+        railLinks: railLinks.map((link) => {
+          const rect = link.getBoundingClientRect();
+          const label = link.querySelector("small");
+          const labelRect = label.getBoundingClientRect();
+          return {
+            height: Math.round(rect.height),
+            labelHeight: Math.round(labelRect.height),
+            labelWidth: Math.round(labelRect.width),
+            text: link.textContent.trim(),
+            width: Math.round(rect.width),
+          };
+        }),
+      };
+    });
     assert.equal(aboutDimensions.scrollWidth, aboutDimensions.clientWidth);
+    assert.equal(aboutDimensions.railDisplay, "flex");
+    assert.equal(aboutDimensions.mobileHeaderDisplay, "none");
+    assert.ok(aboutDimensions.profileRect.right <= aboutDimensions.railRect.right);
+    assert.ok(aboutDimensions.logoutRect.right <= aboutDimensions.railRect.right);
+    assert.equal(aboutDimensions.railLinkCount, 3);
+    assert.deepEqual(
+      aboutDimensions.railLinks.map((link) => link.text),
+      ["▣Projects", "▤Artifact Library", "◷Activity"],
+    );
+    assert.ok(
+      aboutDimensions.railLinks.every(
+        (link) =>
+          link.width === 40 &&
+          link.height === 40 &&
+          link.labelWidth === 1 &&
+          link.labelHeight === 1,
+      ),
+    );
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.getByRole("link", { name: "Explore ArtifactHub" }).click();
     await page.getByRole("heading", { name: "No projects yet" }).waitFor();
@@ -325,10 +379,10 @@ async function run() {
     }));
     assert.equal(dimensions.scrollWidth, dimensions.clientWidth);
 
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.getByRole("button", { name: "Log out" }).click();
     await page.getByRole("heading", { name: "Sign in to ArtifactHub" }).waitFor();
     assert.match(page.url(), /\/auth$/);
-    await page.setViewportSize({ width: 1280, height: 800 });
     await page.getByLabel("Email", { exact: true }).fill(testEmail);
     await page.getByLabel("Password", { exact: true }).fill("browser-pass-123");
     await page.getByRole("button", { name: "Sign in" }).click();

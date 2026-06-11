@@ -3391,7 +3391,11 @@ h1 {
 
 @media (max-width: 680px) {
   .global-rail {
-    display: none;
+    bottom: auto;
+    display: flex;
+    gap: 0.25rem;
+    height: 54px;
+    padding: 0 0.55rem;
   }
 
   .app-canvas {
@@ -3399,49 +3403,60 @@ h1 {
   }
 
   .mobile-header {
-    align-items: center;
-    background: var(--nav);
-    color: white;
-    display: flex;
-    height: 54px;
-    justify-content: space-between;
-    left: 0;
-    padding: 0 0.8rem;
-    position: fixed;
-    right: 0;
-    top: 0;
-    z-index: 30;
+    display: none;
   }
 
-  .mobile-header button {
-    background: transparent;
-    border: 0;
-    color: white;
+  .rail-logo {
+    height: 38px;
+    min-height: 38px;
+    width: 38px;
   }
 
-  .mobile-account-actions {
-    align-items: center;
-    display: flex;
-    gap: 0.55rem;
+  .rail-logo .artifacthub-logo {
+    height: 34px;
+    width: 34px;
   }
 
-  .mobile-account-actions button:last-child {
-    border: 1px solid rgb(255 255 255 / 32%);
-    border-radius: 999px;
-    font-size: 0.74rem;
-    font-weight: 700;
-    padding: 0.32rem 0.58rem;
+  .rail-links {
+    flex: 0 0 auto;
+    gap: 0.25rem;
+    margin-left: 0.35rem;
+    width: auto;
   }
 
-  .mobile-logo {
-    align-items: center;
-    color: white;
-    display: inline-flex;
+  .rail-link,
+  .rail-profile,
+  .rail-logout {
+    flex: 0 0 40px;
+    height: 40px;
+    min-height: 40px;
+    min-width: 40px;
+    padding: 0;
+    width: 40px;
   }
 
-  .mobile-logo .artifacthub-logo {
+  .rail-link small {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
+  }
+
+  .rail-profile {
+    margin-left: auto;
+  }
+
+  .rail-profile span {
     height: 30px;
-    width: 32px;
+    width: 30px;
+  }
+
+  .rail-profile small,
+  .rail-logout small {
+    display: none;
   }
 
   .page-frame,
