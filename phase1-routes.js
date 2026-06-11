@@ -1,11 +1,12 @@
 import express from "express";
 import { generateArtifactTurn } from "./ai-service.js";
+import { recordUsageEvent } from "./src/server/admin-store.js";
 import {
   buildProjectRecommendations,
   contextCompleteness,
   enrichArtifact,
 } from "./artifact-service.js";
-import { config, getFeatureAvailability } from "./config.js";
+import { config } from "./config.js";
 import {
   renderArtifactDocx,
   renderArtifactMarkdown,
@@ -35,6 +36,7 @@ import {
   upsertContextItems,
 } from "./phase1-storage.js";
 import { buildRuleFindings, normalizeAiFindings } from "./review-service.js";
+import { getEffectiveAiStatus, getEffectiveFeatureAvailability } from "./src/server/runtime-settings.js";
 import { updateArtifact } from "./storage.js";
 import { getProjectByIdAndOwnerId } from "./storage.js";
 import { calculateCompleteness, getTemplate } from "./template-service.js";
@@ -44,6 +46,43 @@ const turnHistory = new Map();
 function createPhase1Router(requireAuth) {
   const router = express.Router();
   router.use(requireAuth);
+
+  function requestClientContext(req) {
+    const localHour = Number.parseInt(
+      String(req.get("x-artifacthub-local-hour") || ""),
+      10,
+    );
+    return {
+      timezone: String(req.get("x-artifacthub-timezone") || "").trim() || null,
+      locale: String(req.get("x-artifacthub-locale") || "").trim() || null,
+      landingPath:
+        String(req.get("x-artifacthub-landing-path") || "").trim() || null,
+      referrer:
+        String(req.get("x-artifacthub-referrer") || req.get("referer") || "").trim() ||
+        null,
+      referrerDomain: String(req.get("x-artifacthub-referrer-domain") || "").trim() || null,
+      utmSource: String(req.get("x-artifacthub-utm-source") || "").trim() || null,
+      utmMedium: String(req.get("x-artifacthub-utm-medium") || "").trim() || null,
+      utmCampaign: String(req.get("x-artifacthub-utm-campaign") || "").trim() || null,
+      localHour:
+        Number.isInteger(localHour) && localHour >= 0 && localHour <= 23
+          ? localHour
+          : null,
+    };
+  }
+
+  async function recordRouteUsage(req, eventName, options = {}) {
+    await recordUsageEvent({
+      eventName,
+      userId: req.user?.id || null,
+      requestPath: req.path,
+      projectId: options.projectId || null,
+      artifactId: options.artifactId || null,
+      templateId: options.templateId || null,
+      context: requestClientContext(req),
+      metadata: options.metadata || {},
+    });
+  }
 
   function isRateLimited(userId) {
     const cutoff = Date.now() - 60 * 60 * 1000;
@@ -112,6 +151,9 @@ function createPhase1Router(requireAuth) {
   router.get("/projects/:projectId/activity", async (req, res) => {
     const activity = await listActivity(req.params.projectId, req.user.id, 30);
     if (!activity) return res.status(404).json({ error: "Project not found." });
+    await recordRouteUsage(req, "project.activity_viewed", {
+      projectId: req.params.projectId,
+    });
     res.json({ activity });
   });
 
@@ -120,6 +162,7 @@ function createPhase1Router(requireAuth) {
     const limit = Number.isFinite(requestedLimit)
       ? Math.min(Math.max(requestedLimit, 1), 100)
       : 50;
+    await recordRouteUsage(req, "activity.feed_viewed");
     res.json({ activity: await listGlobalActivity(req.user.id, limit) });
   });
 
@@ -168,9 +211,16 @@ function createPhase1Router(requireAuth) {
   router.post(
     "/projects/:projectId/artifacts/:artifactId/assistant/turns",
     async (req, res) => {
-      const features = getFeatureAvailability(req.user);
+      const features = await getEffectiveFeatureAvailability(req.user);
+      const aiStatus = await getEffectiveAiStatus(req.user);
       if (!features.aiAssistant) {
         return res.status(403).json({ error: "AI assistance is not enabled." });
+      }
+      if (!aiStatus.outboundApiCallsEnabled) {
+        return res.status(503).json({
+          error: "AI outbound API access is currently disabled by an administrator.",
+          code: "AI_OUTBOUND_DISABLED",
+        });
       }
       if (isRateLimited(req.user.id)) {
         return res.status(429).json({
@@ -242,6 +292,12 @@ function createPhase1Router(requireAuth) {
         (await listContextItems(req.params.projectId, req.user.id)) || []
       ).filter((item) => item.trustState === "confirmed");
       const operation = String(req.body.operation || "interview");
+      await recordRouteUsage(req, "assistant.turn_requested", {
+        projectId: req.params.projectId,
+        artifactId: owned.artifact.id,
+        templateId: owned.artifact.templateId,
+        metadata: { operation },
+      });
 
       try {
         const output = await generateArtifactTurn({
@@ -355,6 +411,12 @@ function createPhase1Router(requireAuth) {
           usage: output.usage,
           latencyMs: output.latencyMs,
         });
+        await recordRouteUsage(req, "assistant.turn_completed", {
+          projectId: req.params.projectId,
+          artifactId: owned.artifact.id,
+          templateId: owned.artifact.templateId,
+          metadata: { operation, model: output.model, provider: output.provider },
+        });
         res.json(responseBody);
       } catch (error) {
         await saveAiRun({
@@ -368,6 +430,12 @@ function createPhase1Router(requireAuth) {
           templateVersion: template.version,
           status: "failed",
           errorCode: error.code || "AI_REQUEST_FAILED",
+        });
+        await recordRouteUsage(req, "assistant.turn_failed", {
+          projectId: req.params.projectId,
+          artifactId: owned.artifact.id,
+          templateId: owned.artifact.templateId,
+          metadata: { operation, errorCode: error.code || "AI_REQUEST_FAILED" },
         });
         console.error("Assistant turn failed.", error);
         res.status(502).json({
@@ -417,6 +485,12 @@ function createPhase1Router(requireAuth) {
           sourceRecordId: req.body.sourceRecordId || null,
         })),
       );
+      await recordRouteUsage(req, "assistant.suggestion_accepted", {
+        projectId: req.params.projectId,
+        artifactId: owned.artifact.id,
+        templateId: owned.artifact.templateId,
+        metadata: { updateCount: updates.length },
+      });
       res.json(
         await enrichArtifact(req.params.projectId, result.artifact, req.user.id),
       );
@@ -438,7 +512,13 @@ function createPhase1Router(requireAuth) {
       );
       const findings = buildRuleFindings(owned.artifact, template);
 
-      if (getFeatureAvailability(req.user).aiAssistant && template.aiEnabled) {
+      const features = await getEffectiveFeatureAvailability(req.user);
+      const aiStatus = await getEffectiveAiStatus(req.user);
+      if (
+        features.aiAssistant &&
+        aiStatus.outboundApiCallsEnabled &&
+        template.aiEnabled
+      ) {
         const confirmedContext = (
           (await listContextItems(req.params.projectId, req.user.id)) || []
         ).filter((item) => item.trustState === "confirmed");
@@ -471,6 +551,12 @@ function createPhase1Router(requireAuth) {
         `Reviewed ${owned.artifact.title}.`,
         { artifactId: owned.artifact.id, findingCount: findings.length },
       );
+      await recordRouteUsage(req, "artifact.review_opened", {
+        projectId: req.params.projectId,
+        artifactId: owned.artifact.id,
+        templateId: owned.artifact.templateId,
+        metadata: { findingCount: findings.length },
+      });
       res.json({ findings });
     },
   );
@@ -551,6 +637,12 @@ function createPhase1Router(requireAuth) {
         `Approved ${owned.artifact.title} version ${version.versionNumber}.`,
         { artifactId: owned.artifact.id, versionId: version.id },
       );
+      await recordRouteUsage(req, "artifact.approved", {
+        projectId: req.params.projectId,
+        artifactId: owned.artifact.id,
+        templateId: owned.artifact.templateId,
+        metadata: { versionNumber: version.versionNumber },
+      });
       res.json({ version });
     },
   );
@@ -648,6 +740,12 @@ function createPhase1Router(requireAuth) {
         version,
       });
       await recordExport(artifact.id, version?.id, "docx", req.user.id);
+      await recordRouteUsage(req, "artifact.exported", {
+        projectId: req.params.projectId,
+        artifactId: artifact.id,
+        templateId: artifact.templateId,
+        metadata: { format: "docx", version: version?.versionNumber || null },
+      });
       const suffix = version ? `-v${version.versionNumber}` : "-draft";
       res.setHeader(
         "Content-Type",
@@ -693,6 +791,12 @@ function createPhase1Router(requireAuth) {
         version,
       });
       await recordExport(artifact.id, version?.id, "markdown", req.user.id);
+      await recordRouteUsage(req, "artifact.exported", {
+        projectId: req.params.projectId,
+        artifactId: artifact.id,
+        templateId: artifact.templateId,
+        metadata: { format: "markdown-phase1", version: version?.versionNumber || null },
+      });
       res.type("text/markdown").send(markdown);
     },
   );

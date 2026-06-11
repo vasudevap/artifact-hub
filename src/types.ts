@@ -165,3 +165,75 @@ export type Version = {
   approvedBy: string;
   approvedAt: string;
 };
+
+export type AdminAuditEvent = {
+  id: string;
+  adminUserId: string | null;
+  action: string;
+  targetUserId?: string | null;
+  targetType?: string | null;
+  targetId?: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type AdminUserSummary = User & {
+  updatedAt?: string;
+  projectCount: number;
+  artifactCount: number;
+  sessionCount: number;
+};
+
+export type UsageTimelineEvent = {
+  id: string;
+  eventName: string;
+  userId?: string | null;
+  requestPath?: string | null;
+  projectId?: string | null;
+  artifactId?: string | null;
+  templateId?: string | null;
+  occurredAt: string;
+  context: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
+
+export type AdminUsageEvent = UsageTimelineEvent & {
+  userEmail: string | null;
+  userName: string | null;
+};
+
+export type AdminEventLogResponse = {
+  total: number;
+  events: AdminUsageEvent[];
+};
+
+export type AdminUserDetail = {
+  user: User & { updatedAt?: string };
+  timezone?: string | null;
+  lastLoginAt?: string | null;
+  lastSeenAt?: string | null;
+  sourceSummary: Record<string, unknown>;
+  timeline: UsageTimelineEvent[];
+};
+
+export type AdminOverview = {
+  metrics: Record<string, unknown>;
+  storage: { type: string; ok: boolean };
+  aiStatus: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  recentAdminActions: AdminAuditEvent[];
+  recentUsers: Array<Record<string, unknown>>;
+  totalUsers: number;
+};
+
+export type AdminAnalytics = {
+  range: string;
+  metrics: Record<string, unknown>;
+  topSources: Array<{ label: string; count: number }>;
+  topCampaigns: Array<{ label: string; count: number }>;
+  templateUsage: Array<{ templateId: string; count: number }>;
+  loginByLocalHour: Array<{ hour: number; count: number }>;
+  activityByLocalHour: Array<{ hour: number; count: number }>;
+  funnel: Array<{ label: string; count: number }>;
+  topUsers: Array<Record<string, unknown>>;
+};

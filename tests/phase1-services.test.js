@@ -107,7 +107,7 @@ describe("Phase 1 domain services", () => {
   it("loads ordered, checksummed forward-only migrations", async () => {
     const migrations = await loadMigrations();
 
-    expect(migrations.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(migrations.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(new Set(migrations.map((migration) => migration.checksum)).size).toBe(
       migrations.length,
     );

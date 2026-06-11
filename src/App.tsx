@@ -32,6 +32,13 @@ import { z } from "zod";
 import { api, ApiError, formatDate, formatDateTime } from "./api";
 import type {
   Activity,
+  AdminAnalytics,
+  AdminAuditEvent,
+  AdminOverview,
+  AdminEventLogResponse,
+  AdminUsageEvent,
+  AdminUserDetail,
+  AdminUserSummary,
   Artifact,
   ContextItem,
   FeatureAvailability,
@@ -108,6 +115,9 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
             <Route index element={<Navigate to="/projects" replace />} />
+            <Route path="/admin" element={<AdminRoute />}>
+              <Route index element={<AdminPage />} />
+            </Route>
             <Route path="/projects" element={<ProjectsShell />}>
               <Route index element={<ProjectsPage />} />
               <Route path=":projectId" element={<ProjectWorkspaceShell />}>
@@ -149,8 +159,84 @@ function App() {
 
 function ProtectedRoute() {
   const { user, loading } = useSession();
+  const location = useLocation();
   if (loading) return <FullPageLoading />;
-  return user ? <Outlet /> : <Navigate to="/auth" replace />;
+  return user ? (
+    <Outlet />
+  ) : (
+    <Navigate
+      to="/auth"
+      replace
+      state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+    />
+  );
+}
+
+function AdminRoute() {
+  const { user, loading, refresh } = useSession();
+  const [checkedAdminSession, setCheckedAdminSession] = useState(false);
+
+  useEffect(() => {
+    if (!loading && user && !user.isAdmin && !checkedAdminSession) {
+      void refresh().finally(() => setCheckedAdminSession(true));
+    } else if (!loading) {
+      setCheckedAdminSession(true);
+    }
+  }, [checkedAdminSession, loading, refresh, user]);
+
+  if (loading) return <FullPageLoading />;
+  if (user && !user.isAdmin && !checkedAdminSession) return <FullPageLoading />;
+  return user?.isAdmin ? <Outlet /> : <Navigate to="/projects" replace />;
+}
+
+const ADMIN_EVENT_OPTIONS = [
+  { value: "all", label: "All events" },
+  { value: "auth.login_requested", label: "Login requested" },
+  { value: "auth.login_completed", label: "Login completed" },
+  { value: "auth.signup_completed", label: "Signup completed" },
+  { value: "projects.list_viewed", label: "Projects viewed" },
+  { value: "project.created", label: "Project created" },
+  { value: "library.viewed", label: "Library viewed" },
+  { value: "library.template_opened", label: "Template opened" },
+  { value: "artifact.unassigned_started", label: "Unassigned draft started" },
+  { value: "artifact.created", label: "Artifact created" },
+  { value: "artifact.updated", label: "Artifact updated" },
+  { value: "artifact.approved", label: "Artifact approved" },
+  { value: "artifact.exported", label: "Artifact exported" },
+  { value: "assistant.turn_requested", label: "Assistant requested" },
+  { value: "assistant.turn_completed", label: "Assistant completed" },
+  { value: "admin.password_reset_link_generated", label: "Admin reset link" },
+  { value: "admin.temp_password_set", label: "Admin temp password" },
+  { value: "admin.user_deleted", label: "Admin user deleted" },
+  { value: "admin.sessions_invalidated", label: "Admin sessions invalidated" },
+];
+
+function formatEventContext(event: AdminUsageEvent): string {
+  const source =
+    event.context["utmSource"] ||
+    event.context["referrerDomain"] ||
+    event.context["landingPath"] ||
+    event.context["referrer"] ||
+    "Direct";
+  const campaign =
+    event.context["utmCampaign"] && ` • ${String(event.context["utmCampaign"])}`;
+  const timezone =
+    event.context["timezone"] && ` • ${String(event.context["timezone"])}`;
+  return `${String(source)}${campaign || ""}${timezone || ""}`;
+}
+
+function formatEventTarget(event: AdminUsageEvent): string {
+  const bits: string[] = [];
+  if (event.projectId) {
+    bits.push(`Proj ${event.projectId.slice(0, 6)}`);
+  }
+  if (event.artifactId) {
+    bits.push(`Artifact ${event.artifactId.slice(0, 6)}`);
+  }
+  if (event.templateId) {
+    bits.push(`Template ${event.templateId.slice(0, 6)}`);
+  }
+  return bits.join(" · ") || "No IDs";
 }
 
 const authSchema = z.object({
@@ -161,17 +247,67 @@ const authSchema = z.object({
 
 type AuthValues = z.infer<typeof authSchema>;
 
+function PasswordField({
+  label,
+  name,
+  register,
+  autoComplete,
+  minLength,
+  error,
+  required,
+}: {
+  label: string;
+  name: keyof AuthValues | "currentPassword" | "newPassword" | "confirmPassword";
+  register?: ReturnType<typeof useForm<AuthValues>>["register"];
+  autoComplete?: string;
+  minLength?: number;
+  error?: string;
+  required?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  const registration = register ? register(name as keyof AuthValues) : undefined;
+
+  return (
+    <label>
+      {label}
+      <span className="password-input">
+        <input
+          {...registration}
+          name={registration?.name || String(name)}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          minLength={minLength}
+          required={required}
+        />
+        <button
+          type="button"
+          className="password-toggle"
+          onClick={() => setVisible((current) => !current)}
+          aria-label={`${visible ? "Hide" : "Show"} ${label.toLowerCase()}`}
+        >
+          {visible ? "Hide" : "Show"}
+        </button>
+      </span>
+      {error && <small>{error}</small>}
+    </label>
+  );
+}
+
 function AuthPage() {
   const { user, refresh } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
   const resetToken = new URLSearchParams(location.search).get("resetToken");
+  const requestedDestination =
+    typeof location.state?.from === "string" && location.state.from.startsWith("/")
+      ? location.state.from
+      : "/projects";
   const [mode, setMode] = useState<"login" | "signup" | "forgot" | "reset">(
     resetToken ? "reset" : "login",
   );
   const [message, setMessage] = useState("");
   const [resetUrl, setResetUrl] = useState("");
-  const [postAuthDestination, setPostAuthDestination] = useState("/projects");
+  const [postAuthDestination, setPostAuthDestination] = useState(requestedDestination);
   const {
     register,
     handleSubmit,
@@ -217,7 +353,7 @@ function AuthPage() {
       }
 
       const isSignup = mode === "signup";
-      const destination = isSignup ? "/about" : "/projects";
+      const destination = isSignup ? "/about" : requestedDestination;
       setPostAuthDestination(destination);
       await api(`/api/auth/${isSignup ? "signup" : "login"}`, {
         method: "POST",
@@ -286,15 +422,13 @@ function AuthPage() {
             </label>
           )}
           {mode !== "forgot" && (
-            <label>
-              Password
-              <input
-                {...register("password")}
-                type="password"
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
-              />
-              {errors.password && <small>{errors.password.message}</small>}
-            </label>
+            <PasswordField
+              label="Password"
+              name="password"
+              register={register}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              error={errors.password?.message}
+            />
           )}
           {message && <p className="form-message">{message}</p>}
           {resetUrl && (
@@ -335,6 +469,7 @@ function AppShell() {
   const [accountOpen, setAccountOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const isAdminArea = location.pathname.startsWith("/admin");
   const aboutActive = location.pathname === "/about";
   const artifactLibraryActive =
     location.pathname === "/library" ||
@@ -352,67 +487,92 @@ function AppShell() {
 
   return (
     <div className="app-shell">
-      <nav className="global-rail" aria-label="Global navigation">
-        <Link
-          to="/about"
-          className={`rail-logo ${aboutActive ? "active" : ""}`}
-          aria-current={aboutActive ? "page" : undefined}
-          aria-label="About ArtifactHub"
-        >
-          <ArtifactHubLogo variant="app-icon-dark" />
-        </Link>
-        <div className="rail-links">
-          <RailLink
-            to="/projects"
-            icon="▣"
-            label="Projects"
-            active={projectsActive}
-          />
-          <RailLink
-            to="/library"
-            icon="▤"
-            label="Artifact Library"
-            active={artifactLibraryActive}
-          />
-          <RailLink
-            to="/activity"
-            icon="◷"
-            label="Activity"
-            active={activityActive}
-          />
-        </div>
-        <button
-          className="rail-profile"
-          onClick={() => setAccountOpen(true)}
-          aria-label="Open account settings"
-        >
-          <span>{initials(user?.name)}</span>
-          <small>{user?.name.split(" ")[0]}</small>
-        </button>
-        <button
-          className="rail-logout"
-          onClick={handleLogout}
-          aria-label="Log out"
-          title="Log out"
-        >
-          ↩<small>Log out</small>
-        </button>
-      </nav>
-      <div className="app-canvas">
-        <header className="mobile-header">
-          <Link to="/about" className="mobile-logo" aria-label="About ArtifactHub">
-            <ArtifactHubLogo variant="mark-white" />
+      {!isAdminArea && (
+        <nav className="global-rail" aria-label="Global navigation">
+          <Link
+            to="/about"
+            className={`rail-logo ${aboutActive ? "active" : ""}`}
+            aria-current={aboutActive ? "page" : undefined}
+            aria-label="About ArtifactHub"
+          >
+            <ArtifactHubLogo variant="app-icon-dark" />
           </Link>
-          <div className="mobile-account-actions">
-            <button onClick={() => setAccountOpen(true)}>{user?.name}</button>
-            <button onClick={handleLogout} aria-label="Log out">Log out</button>
+          <div className="rail-links">
+            <RailLink
+              to="/projects"
+              icon="▣"
+              label="Projects"
+              active={projectsActive}
+            />
+            <RailLink
+              to="/library"
+              icon="▤"
+              label="Artifact Library"
+              active={artifactLibraryActive}
+            />
+            <RailLink
+              to="/activity"
+              icon="◷"
+              label="Activity"
+              active={activityActive}
+            />
           </div>
-        </header>
+          <button
+            className="rail-profile"
+            onClick={() => setAccountOpen(true)}
+            aria-label="Open account settings"
+          >
+            <span>{initials(user?.name)}</span>
+            <small>{user?.name.split(" ")[0]}</small>
+          </button>
+          <button
+            className="rail-logout"
+            onClick={handleLogout}
+            aria-label="Log out"
+            title="Log out"
+          >
+            ↩<small>Log out</small>
+          </button>
+        </nav>
+      )}
+      <div className={`app-canvas ${isAdminArea ? "app-canvas-admin" : ""}`}>
+        {isAdminArea && (
+          <header className="admin-command-bar">
+            <div>
+              <p className="eyebrow">Admin command station</p>
+              <h1>Operations Console</h1>
+            </div>
+            <div className="admin-command-actions">
+              <button
+                className="secondary-button"
+                onClick={() => setAccountOpen(true)}
+              >
+                {user?.name}
+              </button>
+              <button className="secondary-button" onClick={handleLogout}>
+                Sign out
+              </button>
+            </div>
+          </header>
+        )}
+        {!isAdminArea && (
+          <header className="mobile-header">
+            <Link to="/about" className="mobile-logo" aria-label="About ArtifactHub">
+              <ArtifactHubLogo variant="mark-white" />
+            </Link>
+            <div className="mobile-account-actions">
+              <button onClick={() => setAccountOpen(true)}>{user?.name}</button>
+              <button onClick={handleLogout} aria-label="Log out">Log out</button>
+            </div>
+          </header>
+        )}
         <Outlet />
-        <footer className="demo-footer">
-          <strong>Active Demo</strong>
-          <span>Do not enter confidential or sensitive information.</span>
-        </footer>
+        {!isAdminArea && (
+          <footer className="demo-footer">
+            <strong>Active Demo</strong>
+            <span>Do not enter confidential or sensitive information.</span>
+          </footer>
+        )}
       </div>
       {accountOpen && (
         <AccountDialog
@@ -455,18 +615,8 @@ function AccountDialog({
   onLogout: () => void;
 }) {
   const { user, refresh } = useSession();
+  const navigate = useNavigate();
   const [message, setMessage] = useState("");
-  const [users, setUsers] = useState<
-    Array<User & { projectCount: number; artifactCount: number }>
-  >([]);
-
-  useEffect(() => {
-    if (user?.isAdmin) {
-      api<{ users: typeof users }>("/api/admin/users")
-        .then((data) => setUsers(data.users))
-        .catch(() => setMessage("Unable to load demo accounts."));
-    }
-  }, [user?.isAdmin]);
 
   async function changePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -491,12 +641,6 @@ function AccountDialog({
     }
   }
 
-  async function deleteUser(target: User) {
-    if (!window.confirm(`Delete ${target.email} and all owned work?`)) return;
-    await api(`/api/admin/users/${target.id}`, { method: "DELETE" });
-    setUsers((current) => current.filter((item) => item.id !== target.id));
-  }
-
   return (
     <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
       <section
@@ -517,42 +661,673 @@ function AccountDialog({
           </button>
         </div>
         <form className="stack-form compact" onSubmit={changePassword}>
-          <label>
-            Current password
-            <input name="currentPassword" type="password" required />
-          </label>
-          <label>
-            New password
-            <input name="newPassword" type="password" minLength={8} required />
-          </label>
-          <label>
-            Confirm new password
-            <input name="confirmPassword" type="password" minLength={8} required />
-          </label>
+          <PasswordField
+            label="Current password"
+            name="currentPassword"
+            autoComplete="current-password"
+            required
+          />
+          <PasswordField
+            label="New password"
+            name="newPassword"
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+          <PasswordField
+            label="Confirm new password"
+            name="confirmPassword"
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
           <button className="secondary-button">Update password</button>
           {message && <p className="form-message">{message}</p>}
         </form>
         {user?.isAdmin && (
           <section className="admin-section">
-            <h3>Demo accounts</h3>
-            {users.map((account) => (
-              <div className="admin-row" key={account.id}>
-                <div>
-                  <strong>{account.email}</strong>
-                  <small>
-                    {account.projectCount} projects · {account.artifactCount} artifacts
-                  </small>
-                </div>
-                {account.id !== user.id && (
-                  <button onClick={() => deleteUser(account)}>Delete</button>
-                )}
+            <h3>Admin</h3>
+            <div className="admin-row">
+              <div>
+                <strong>Open admin console</strong>
+                <small>Operational controls, analytics, users, and AI settings.</small>
               </div>
-            ))}
+              <button
+                onClick={() => {
+                  onClose();
+                  navigate("/admin");
+                }}
+              >
+                Open /admin
+              </button>
+            </div>
           </section>
         )}
         <button className="danger-link" onClick={onLogout}>Log out</button>
       </section>
     </div>
+  );
+}
+
+function AdminPage() {
+  const { user } = useSession();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [range, setRange] = useState("7d");
+  const [activeTab, setActiveTab] = useState("overview");
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [eventNameFilter, setEventNameFilter] = useState("all");
+  const [eventUserFilter, setEventUserFilter] = useState("");
+
+  const overviewQuery = useQuery({
+    queryKey: ["admin-overview", range],
+    queryFn: () => api<AdminOverview>(`/api/admin/overview?range=${range}`),
+  });
+  const usersQuery = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: () => api<{ users: AdminUserSummary[] }>("/api/admin/users"),
+  });
+  const analyticsQuery = useQuery({
+    queryKey: ["admin-analytics", range],
+    queryFn: () => api<AdminAnalytics>(`/api/admin/analytics?range=${range}`),
+  });
+  const endpointsQuery = useQuery({
+    queryKey: ["admin-library-endpoints"],
+    queryFn: () =>
+      api<{ endpoints: Array<Record<string, unknown>> }>("/api/admin/library-endpoints"),
+  });
+  const systemQuery = useQuery({
+    queryKey: ["admin-system"],
+    queryFn: () => api<Record<string, unknown>>("/api/admin/system"),
+  });
+  const userDetailQuery = useQuery({
+    queryKey: ["admin-user-detail", selectedUserId],
+    queryFn: () => api<AdminUserDetail>(`/api/admin/users/${selectedUserId}`),
+    enabled: Boolean(selectedUserId),
+  });
+  const eventLogQuery = useQuery({
+    queryKey: ["admin-events", range, eventNameFilter, eventUserFilter],
+    queryFn: () => {
+      const params = new URLSearchParams({
+        range,
+        limit: "180",
+      });
+      if (eventNameFilter !== "all") {
+        params.set("eventName", eventNameFilter);
+      }
+      if (eventUserFilter) {
+        params.set("userId", eventUserFilter);
+      }
+      return api<AdminEventLogResponse>(
+        `/api/admin/events?${params.toString()}`,
+      );
+    },
+  });
+
+  const refreshAdminQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["admin-overview"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-analytics"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-system"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-user-detail"] }),
+      queryClient.invalidateQueries({ queryKey: ["admin-events"] }),
+    ]);
+  };
+
+  async function generateResetLink(target: AdminUserSummary) {
+    const response = await api<{ resetUrl: string; expiresAt: string }>(
+      `/api/admin/users/${target.id}/password-reset-link`,
+      { method: "POST" },
+    );
+    window.prompt(
+      `Reset link for ${target.email}. It expires ${formatDateTime(response.expiresAt)}.`,
+      response.resetUrl,
+    );
+    await refreshAdminQueries();
+  }
+
+  async function setTemporaryPassword(target: AdminUserSummary) {
+    const temporaryPassword = window.prompt(
+      `Set a temporary password for ${target.email}`,
+      "",
+    );
+    if (!temporaryPassword) return;
+    await api(`/api/admin/users/${target.id}/temporary-password`, {
+      method: "POST",
+      json: { temporaryPassword },
+    });
+    await refreshAdminQueries();
+  }
+
+  async function invalidateSessions(target: AdminUserSummary) {
+    if (!window.confirm(`Invalidate all active sessions for ${target.email}?`)) return;
+    await api(`/api/admin/users/${target.id}/invalidate-sessions`, {
+      method: "POST",
+    });
+    await refreshAdminQueries();
+  }
+
+  async function deleteUser(target: AdminUserSummary) {
+    if (!window.confirm(`Delete ${target.email} and all owned work?`)) return;
+    await api(`/api/admin/users/${target.id}`, { method: "DELETE" });
+    if (selectedUserId === target.id) {
+      setSelectedUserId("");
+    }
+    await refreshAdminQueries();
+  }
+
+  async function updateSystemSetting(next: {
+    aiEnabledOverride?: boolean | null;
+    outboundApiCallsEnabled?: boolean;
+  }) {
+    await api("/api/admin/system", {
+      method: "PUT",
+      json: next,
+    });
+    await refreshAdminQueries();
+  }
+
+  const users = usersQuery.data?.users || [];
+  const overviewMetrics = overviewQuery.data?.metrics || {};
+  const analytics = analyticsQuery.data;
+  const aiStatus = (systemQuery.data?.aiStatus as Record<string, unknown>) || {};
+  const settings = (systemQuery.data?.settings as Record<string, unknown>) || {};
+  const selectedDetail = userDetailQuery.data;
+  const eventEntries = eventLogQuery.data?.events || [];
+  const selectedEventUser =
+    users.find((account) => account.id === eventUserFilter)?.email || "All users";
+  const selectedUser = users.find((account) => account.id === selectedUserId);
+  const selectedActionUser = selectedDetail
+    ? (selectedUser || (selectedDetail.user as AdminUserSummary))
+    : null;
+  const loginHourBuckets = analytics?.loginByLocalHour || [];
+  const activityHourBuckets = analytics?.activityByLocalHour || [];
+  const loginMax = Math.max(1, ...loginHourBuckets.map((entry) => entry.count || 0));
+  const activityMax = Math.max(
+    1,
+    ...activityHourBuckets.map((entry) => entry.count || 0),
+  );
+  const funnelMax = Math.max(
+    1,
+    ...(analytics?.funnel || []).map((step) => step.count || 0),
+  );
+  const adminTabs = [
+    { id: "overview", label: "Overview", icon: "◰" },
+    { id: "users", label: "Users", icon: "👥" },
+    { id: "events", label: "Event Log", icon: "◷" },
+    { id: "telemetry", label: "Telemetry", icon: "📊" },
+    { id: "api", label: "API Explorer", icon: "▤" },
+    { id: "controls", label: "System Controls", icon: "⚙" },
+  ];
+
+  return (
+    <main className="admin-workspace-shell">
+      <aside className="admin-sidebar" aria-label="Operations Cockpit sections">
+        <div className="admin-sidebar-header">
+          <p className="eyebrow">Admin</p>
+          <h2>Operations Cockpit</h2>
+          <small>Demo operations and telemetry.</small>
+        </div>
+        <nav className="admin-sidebar-nav" aria-label="Admin console navigation">
+          {adminTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`admin-sidebar-link ${activeTab === tab.id ? "active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+              type="button"
+            >
+              <span aria-hidden="true">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+        <div className="admin-sidebar-footer">
+          <label>
+            Range
+            <select value={range} onChange={(event) => setRange(event.target.value)}>
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7d</option>
+              <option value="30d">Last 30d</option>
+              <option value="all">All time</option>
+            </select>
+          </label>
+          <button className="secondary-button" onClick={() => void refreshAdminQueries()}>
+            Refresh
+          </button>
+          <button className="secondary-button" onClick={() => navigate("/projects")}>
+            Back to work
+          </button>
+        </div>
+      </aside>
+
+      <section className="admin-workspace-content">
+        {activeTab === "overview" && (
+          <div className="admin-tab-panel">
+            <div className="admin-view-heading">
+              <div>
+                <p className="eyebrow">System pulse</p>
+                <h2>Overview</h2>
+              </div>
+              <span className="admin-count-chip">Live</span>
+            </div>
+            {overviewQuery.isLoading ? (
+              <PanelLoading label="Loading overview..." />
+            ) : (
+              <div className="admin-metric-grid">
+                {([
+                  ["Users", overviewQuery.data?.totalUsers],
+                  ["Active", overviewMetrics.activeUsers],
+                  ["Signups", overviewMetrics.signups],
+                  ["Logins", overviewMetrics.logins],
+                  ["Projects", overviewMetrics.projectsCreated],
+                  ["Artifacts", overviewMetrics.artifactsCreated],
+                  ["Exports", overviewMetrics.exports],
+                  ["AI turns", overviewMetrics.aiTurns],
+                ] as Array<[string, unknown]>).map(([label, value]) => (
+                  <div className="admin-metric-card" key={String(label)}>
+                    <span>{label}</span>
+                    <strong>{String(value ?? 0)}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="admin-status-row admin-status-bar">
+              <small>Storage: {String(overviewQuery.data?.storage?.type || "unknown")}</small>
+              <small>AI: {aiStatus.effectiveAiEnabled ? "Enabled" : "Disabled"}</small>
+              <small>Outbound API: {aiStatus.outboundApiCallsEnabled ? "On" : "Off"}</small>
+            </div>
+            <div className="admin-audit-list">
+              {(overviewQuery.data?.recentAdminActions || []).map((item: AdminAuditEvent) => (
+                <div key={item.id}>
+                  <strong>{item.action}</strong>
+                  <small>{formatDateTime(item.createdAt)}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "users" && (
+          <div className="admin-tab-panel">
+            <div className="admin-view-heading">
+              <div>
+                <p className="eyebrow">Identity layer</p>
+                <h2>Users</h2>
+              </div>
+              <span className="admin-count-chip">{users.length}</span>
+            </div>
+            <div className="admin-user-split">
+              <div className="admin-user-table">
+                {users.map((account) => (
+                  <button
+                    key={account.id}
+                    className={`admin-user-row ${selectedUserId === account.id ? "active" : ""}`}
+                    onClick={() => setSelectedUserId(account.id)}
+                    type="button"
+                  >
+                    <div>
+                      <strong>{account.email}</strong>
+                      <small>
+                        {account.projectCount} projects · {account.artifactCount} artifacts ·{" "}
+                        {account.sessionCount} sessions
+                      </small>
+                    </div>
+                    <span>{account.id === user?.id ? "You" : "View"}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="admin-user-detail">
+                {selectedDetail ? (
+                  <>
+                    <h3>{selectedDetail.user.email}</h3>
+                    <p>
+                      Last login: {formatDateTime(selectedDetail.lastLoginAt || undefined)} · Last
+                      seen: {formatDateTime(selectedDetail.lastSeenAt || undefined)}
+                    </p>
+                    <p>Timezone: {String(selectedDetail.timezone || "Not captured yet")}</p>
+                    <div className="admin-actions">
+                      {selectedDetail.user.id !== user?.id && selectedActionUser && (
+                        <>
+                          <button
+                            className="secondary-button"
+                            onClick={() => generateResetLink(selectedActionUser)}
+                          >
+                            Reset link
+                          </button>
+                          <button
+                            className="secondary-button"
+                            onClick={() => setTemporaryPassword(selectedActionUser)}
+                          >
+                            Temp password
+                          </button>
+                          <button
+                            className="secondary-button"
+                            onClick={() => invalidateSessions(selectedActionUser)}
+                          >
+                            Invalidate sessions
+                          </button>
+                          <button
+                            className="secondary-button"
+                            onClick={() => {
+                              setEventUserFilter(selectedDetail.user.id);
+                              setActiveTab("events");
+                            }}
+                          >
+                            Filter event log
+                          </button>
+                          <button
+                            className="danger-link"
+                            onClick={() => deleteUser(selectedActionUser)}
+                          >
+                            Delete user
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    <div className="admin-timeline">
+                      {selectedDetail.timeline.slice(0, 12).map((event) => (
+                        <div key={event.id}>
+                          <strong>{event.eventName}</strong>
+                          <small>{formatDateTime(event.occurredAt)}</small>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="admin-empty-state">
+                    <h3>Select a user</h3>
+                    <p>Choose an account to review access, sessions, and timeline activity.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "events" && (
+          <div className="admin-tab-panel">
+            <div className="admin-view-heading">
+              <div>
+                <p className="eyebrow">Streams</p>
+                <h2>Event Log</h2>
+              </div>
+              <span className="admin-count-chip">{eventEntries.length}</span>
+            </div>
+            <div className="admin-event-controls">
+              <label>
+                Event type
+                <select
+                  value={eventNameFilter}
+                  onChange={(event) => setEventNameFilter(event.target.value)}
+                >
+                  {ADMIN_EVENT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                User
+                <select
+                  value={eventUserFilter}
+                  onChange={(event) => setEventUserFilter(event.target.value)}
+                >
+                  <option value="">All users</option>
+                  {users.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.email}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="admin-event-list">
+              {eventLogQuery.isLoading ? (
+                <PanelLoading label="Loading events..." />
+              ) : (
+                <div className="admin-event-list-inner">
+                  <div className="admin-event-head">
+                    <span>Time</span>
+                    <span>User</span>
+                    <span>Event</span>
+                    <span>Path</span>
+                    <span>Context</span>
+                    <span>Targets</span>
+                  </div>
+                  {eventEntries.length ? (
+                    eventEntries.map((entry) => (
+                      <div className="admin-event-row" key={entry.id}>
+                        <span>{formatDateTime(entry.occurredAt)}</span>
+                        <span>{entry.userEmail || "System"}</span>
+                        <span className="admin-event-name">{entry.eventName}</span>
+                        <span>{entry.requestPath || "—"}</span>
+                        <span>{formatEventContext(entry)}</span>
+                        <span>{formatEventTarget(entry)}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="admin-event-empty">No events for this filter.</p>
+                  )}
+                </div>
+              )}
+            </div>
+            <p className="helper-copy">
+              Showing {eventEntries.length} {eventNameFilter === "all" ? "events" : "matching events"} for{" "}
+              {selectedEventUser}
+              {eventLogQuery.data ? ` (up to ${eventLogQuery.data.total} available)` : ""}
+            </p>
+          </div>
+        )}
+
+        {activeTab === "telemetry" && (
+          <div className="admin-tab-panel">
+            <div className="admin-view-heading">
+              <div>
+                <p className="eyebrow">Telemetry</p>
+                <h2>Analytics</h2>
+              </div>
+              <span className="admin-count-chip">{analytics?.topSources?.length || 0}</span>
+            </div>
+            {analyticsQuery.isLoading ? (
+              <PanelLoading label="Loading analytics..." />
+            ) : (
+              <>
+                <div className="admin-inline-groups">
+                  <div>
+                    <p className="sidebar-section-label">Top sources</p>
+                    {(analytics?.topSources || []).map((item) => (
+                      <div className="admin-stat-line" key={item.label}>
+                        <span>{item.label}</span>
+                        <strong>{item.count}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div>
+                    <p className="sidebar-section-label">Top campaigns</p>
+                    {(analytics?.topCampaigns || []).map((item) => (
+                      <div className="admin-stat-line" key={item.label}>
+                        <span>{item.label}</span>
+                        <strong>{item.count}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="sidebar-section-label">Funnel</p>
+                  <div className="admin-funnel-list">
+                    {(analytics?.funnel || []).map((step) => {
+                      const width = (step.count / funnelMax) * 100;
+                      return (
+                        <div className="admin-funnel-row" key={step.label}>
+                          <div className="admin-stat-line">
+                            <span>{step.label}</span>
+                            <strong>{step.count}</strong>
+                          </div>
+                          <span className="admin-funnel-track">
+                            <span
+                              className="admin-funnel-fill"
+                              style={{ width: `${width.toFixed(1)}%` }}
+                            />
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="admin-inline-groups">
+                  <div>
+                    <p className="sidebar-section-label">Login hour heatmap</p>
+                    <div className="admin-heat-grid">
+                      {loginHourBuckets.map((entry) => {
+                        const width = (entry.count / loginMax) * 100;
+                        return (
+                          <div className="admin-heat-row" key={`login-${entry.hour}`}>
+                            <span>{entry.hour}:00</span>
+                            <span className="admin-heat-track">
+                              <span
+                                className="admin-heat-fill"
+                                style={{ width: `${width.toFixed(1)}%` }}
+                              />
+                            </span>
+                            <strong>{entry.count}</strong>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="sidebar-section-label">Activity hour heatmap</p>
+                    <div className="admin-heat-grid">
+                      {activityHourBuckets.map((entry) => {
+                        const width = (entry.count / activityMax) * 100;
+                        return (
+                          <div className="admin-heat-row" key={`activity-${entry.hour}`}>
+                            <span>{entry.hour}:00</span>
+                            <span className="admin-heat-track">
+                              <span
+                                className="admin-heat-fill"
+                                style={{ width: `${width.toFixed(1)}%` }}
+                              />
+                            </span>
+                            <strong>{entry.count}</strong>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === "api" && (
+          <div className="admin-tab-panel">
+            <div className="admin-view-heading">
+              <div>
+                <p className="eyebrow">Platform surface</p>
+                <h2>API Explorer</h2>
+              </div>
+              <span className="admin-count-chip">
+                {endpointsQuery.data?.endpoints.length || 0}
+              </span>
+            </div>
+            <div className="admin-endpoint-list">
+              {(endpointsQuery.data?.endpoints || []).map((endpoint) => (
+                <div key={`${endpoint.method}-${endpoint.path}`}>
+                  <strong>
+                    {String(endpoint.method)} {String(endpoint.path)}
+                  </strong>
+                  <small>{String(endpoint.purpose)}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "controls" && (
+          <div className="admin-tab-panel">
+            <div className="admin-view-heading">
+              <div>
+                <p className="eyebrow">Execution controls</p>
+                <h2>System Controls</h2>
+              </div>
+              <span className="admin-count-chip">
+                AI {aiStatus.effectiveAiEnabled ? "active" : "off"}
+              </span>
+            </div>
+            <div className="admin-control-list">
+              <label className="admin-toggle-row">
+                <span>Global AI enabled override</span>
+                <select
+                  value={
+                    settings.aiEnabledOverride === null
+                      ? "inherit"
+                      : settings.aiEnabledOverride
+                        ? "on"
+                        : "off"
+                  }
+                  onChange={(event) =>
+                    updateSystemSetting({
+                      aiEnabledOverride:
+                        event.target.value === "inherit"
+                          ? null
+                          : event.target.value === "on",
+                      outboundApiCallsEnabled: Boolean(
+                        systemQuery.data?.settings &&
+                          (systemQuery.data.settings as Record<string, unknown>)
+                            .outboundApiCallsEnabled !== false,
+                      ),
+                    })
+                  }
+                >
+                  <option value="inherit">Inherit env</option>
+                  <option value="on">Force on</option>
+                  <option value="off">Force off</option>
+                </select>
+              </label>
+              <label className="admin-toggle-row">
+                <span>Outbound AI/API calls</span>
+                <input
+                  type="checkbox"
+                  checked={settings.outboundApiCallsEnabled !== false}
+                  onChange={(event) =>
+                    updateSystemSetting({
+                      aiEnabledOverride:
+                        settings.aiEnabledOverride === true ||
+                        settings.aiEnabledOverride === false
+                          ? Boolean(settings.aiEnabledOverride)
+                          : null,
+                      outboundApiCallsEnabled: event.target.checked,
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <div className="admin-module-spacer" />
+            <div className="admin-stat-line">
+              <span>Configured provider</span>
+              <strong>{String(aiStatus.provider || "unknown")}</strong>
+            </div>
+            <div className="admin-stat-line">
+              <span>Configured model</span>
+              <strong>{String(aiStatus.model || "unknown")}</strong>
+            </div>
+            <div className="admin-stat-line">
+              <span>Reasoning</span>
+              <strong>{String(aiStatus.reasoningEffort || "unknown")}</strong>
+            </div>
+            <p className="helper-copy">
+              Runtime provider/model editing is intentionally placeholder-only in this
+              version. Global AI availability and outbound AI access are the active
+              controls today.
+            </p>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
 

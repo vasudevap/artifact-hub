@@ -2,14 +2,25 @@ import express from "express";
 import path from "path";
 import { pathToFileURL } from "url";
 import { fileURLToPath } from "url";
-import crypto from "crypto";
 import { enrichArtifact, enrichProject } from "./artifact-service.js";
-import { config, getFeatureAvailability, normalizeEmail } from "./config.js";
+import { config, normalizeEmail } from "./config.js";
+import { createSessionToken, hashPassword, verifyPassword } from "./src/server/auth-utils.js";
+import {
+  getAdminAnalytics,
+  getAdminUserDetail,
+  listUsageEvents,
+  getSystemSettings,
+  listAdminAuditEvents,
+  recordAdminAuditEvent,
+  recordUsageEvent,
+  updateSystemSettings,
+} from "./src/server/admin-store.js";
 import {
   renderArtifactMarkdown as renderVersionedMarkdown,
   slugifyFilename,
 } from "./export-service.js";
 import { createPhase1Router } from "./phase1-routes.js";
+import { getEffectiveAiStatus, getEffectiveFeatureAvailability } from "./src/server/runtime-settings.js";
 import {
   listVersions,
   recordActivity,
@@ -28,6 +39,7 @@ import {
   deleteArtifact,
   deleteProjectByIdAndOwnerId,
   deleteSessionByToken,
+  deleteSessionsByUserId,
   deleteUserById,
   getProjectByIdAndOwnerId,
   getArtifactByIdAndOwnerId,
@@ -54,20 +66,11 @@ const __dirname = path.dirname(__filename);
 const SESSION_COOKIE_NAME = "artifacthub_session";
 const ADMIN_EMAILS = config.adminEmails;
 
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-  return `${salt}:${hash}`;
-}
-
-function verifyPassword(password, storedHash) {
-  const [salt, hash] = storedHash.split(":");
-  const candidate = crypto.scryptSync(password, salt, 64);
-  const stored = Buffer.from(hash, "hex");
-
+function isAdminEmail(email) {
+  const normalized = normalizeEmail(email);
   return (
-    stored.length === candidate.length &&
-    crypto.timingSafeEqual(stored, candidate)
+    normalized === normalizeEmail(config.bootstrapAdminEmail) ||
+    ADMIN_EMAILS.has(normalized)
   );
 }
 
@@ -76,7 +79,7 @@ function safeUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
-    isAdmin: ADMIN_EMAILS.has(normalizeEmail(user.email)),
+    isAdmin: isAdminEmail(user.email),
     createdAt: user.createdAt,
   };
 }
@@ -106,6 +109,163 @@ function clearSessionCookie(res) {
     "Set-Cookie",
     `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
   );
+}
+
+function parseRangeStart(range) {
+  if (range === "24h") {
+    return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  }
+  if (range === "7d") {
+    return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  }
+  if (range === "30d") {
+    return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  }
+  return undefined;
+}
+
+function requestClientContext(req) {
+  const timezone = String(req.get("x-artifacthub-timezone") || "").trim() || null;
+  const locale = String(req.get("x-artifacthub-locale") || "").trim() || null;
+  const landingPath =
+    String(req.get("x-artifacthub-landing-path") || "").trim() || null;
+  const referrer = String(
+    req.get("x-artifacthub-referrer") || req.get("referer") || "",
+  ).trim();
+  const referrerUrl = referrer || null;
+  let referrerDomain = null;
+  try {
+    referrerDomain = referrerUrl ? new URL(referrerUrl).hostname : null;
+  } catch {
+    referrerDomain = null;
+  }
+
+  const localHour = Number.parseInt(
+    String(req.get("x-artifacthub-local-hour") || ""),
+    10,
+  );
+  const utcOffsetMinutes = Number.parseInt(
+    String(req.get("x-artifacthub-utc-offset") || ""),
+    10,
+  );
+
+  return {
+    timezone,
+    locale,
+    landingPath,
+    referrer: referrerUrl,
+    referrerDomain,
+    utmSource: String(req.get("x-artifacthub-utm-source") || "").trim() || null,
+    utmMedium: String(req.get("x-artifacthub-utm-medium") || "").trim() || null,
+    utmCampaign:
+      String(req.get("x-artifacthub-utm-campaign") || "").trim() || null,
+    utmTerm: String(req.get("x-artifacthub-utm-term") || "").trim() || null,
+    utmContent: String(req.get("x-artifacthub-utm-content") || "").trim() || null,
+    userAgent: String(req.get("user-agent") || "").trim() || null,
+    localHour:
+      Number.isInteger(localHour) && localHour >= 0 && localHour <= 23
+        ? localHour
+        : null,
+    utcOffsetMinutes: Number.isFinite(utcOffsetMinutes) ? utcOffsetMinutes : null,
+    ipAddress:
+      String(req.get("x-forwarded-for") || req.ip || "")
+        .split(",")[0]
+        .trim() || null,
+    country: String(req.get("x-vercel-ip-country") || req.get("cf-ipcountry") || "")
+      .trim() || null,
+    region: String(req.get("x-vercel-ip-country-region") || "").trim() || null,
+    city: String(req.get("x-vercel-ip-city") || "").trim() || null,
+  };
+}
+
+async function recordRequestUsage(req, eventName, options = {}) {
+  return recordUsageEvent({
+    eventName,
+    userId: options.userId || req.user?.id || null,
+    sessionId: parseCookies(req)[SESSION_COOKIE_NAME] || null,
+    requestPath: req.path,
+    projectId: options.projectId || null,
+    artifactId: options.artifactId || null,
+    templateId: options.templateId || null,
+    context: requestClientContext(req),
+    metadata: options.metadata || {},
+  });
+}
+
+function buildLibraryEndpointRegistry() {
+  return [
+    {
+      method: "GET",
+      path: "/api/templates",
+      authRequired: false,
+      purpose: "List all standardized artifact templates.",
+      status: "available",
+    },
+    {
+      method: "GET",
+      path: "/api/templates/:id",
+      authRequired: false,
+      purpose: "Read a single template definition and field breakdown.",
+      status: "available",
+    },
+    {
+      method: "POST",
+      path: "/api/artifacts",
+      authRequired: true,
+      purpose: "Start a private unassigned draft from a template.",
+      status: "available",
+    },
+    {
+      method: "GET",
+      path: "/api/artifacts?scope=unassigned",
+      authRequired: true,
+      purpose: "List private unassigned drafts for the signed-in user.",
+      status: "available",
+    },
+    {
+      method: "GET",
+      path: "/api/artifacts/:artifactId",
+      authRequired: true,
+      purpose: "Open a draft or assigned artifact owned by the signed-in user.",
+      status: "available",
+    },
+    {
+      method: "PUT",
+      path: "/api/artifacts/:artifactId",
+      authRequired: true,
+      purpose: "Save an owned artifact draft with revision protection.",
+      status: "available",
+    },
+    {
+      method: "POST",
+      path: "/api/artifacts/:artifactId/assign",
+      authRequired: true,
+      purpose: "Assign a private draft to an owned project.",
+      status: "available",
+    },
+  ];
+}
+
+async function ensureBootstrapAdminAccount() {
+  const existing = await getUserByEmail(config.bootstrapAdminEmail);
+  if (existing) {
+    return existing;
+  }
+
+  return createUser({
+    name: "Prashant Admin",
+    email: config.bootstrapAdminEmail,
+    passwordHash: hashPassword(config.bootstrapAdminPassword),
+  });
+}
+
+let bootstrapAdminReady;
+
+async function ensureBootstrapAdminReady() {
+  if (!bootstrapAdminReady) {
+    bootstrapAdminReady = ensureBootstrapAdminAccount();
+  }
+  return bootstrapAdminReady;
 }
 
 async function readTemplates() {
@@ -179,7 +339,7 @@ async function requireAuth(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (!ADMIN_EMAILS.has(normalizeEmail(req.user?.email))) {
+  if (!isAdminEmail(req.user?.email)) {
     return res.status(403).json({ error: "Administrator access required." });
   }
 
@@ -189,6 +349,14 @@ function requireAdmin(req, res, next) {
 app.use(express.static(path.join(__dirname, "dist")));
 app.use(express.static(path.join(__dirname, "public"), { index: false }));
 app.use(express.json());
+app.use(async (req, res, next) => {
+  try {
+    await ensureBootstrapAdminReady();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get("/api/health", async (req, res) => {
   try {
@@ -233,13 +401,14 @@ app.post("/api/auth/signup", async (req, res) => {
     });
     const session = await createSession({
       userId: user.id,
-      token: crypto.randomBytes(32).toString("hex"),
+      token: createSessionToken(),
     });
     setSessionCookie(res, session.token);
+    await recordRequestUsage(req, "auth.signup_completed", { userId: user.id });
 
     res.status(201).json({
       user: safeUser(user),
-      features: getFeatureAvailability(user),
+      features: await getEffectiveFeatureAvailability(user),
     });
   } catch (error) {
     console.error("Failed to create account.", error);
@@ -260,13 +429,14 @@ app.post("/api/auth/login", async (req, res) => {
 
     const session = await createSession({
       userId: user.id,
-      token: crypto.randomBytes(32).toString("hex"),
+      token: createSessionToken(),
     });
     setSessionCookie(res, session.token);
+    await recordRequestUsage(req, "auth.login_completed", { userId: user.id });
 
     res.json({
       user: safeUser(user),
-      features: getFeatureAvailability(user),
+      features: await getEffectiveFeatureAvailability(user),
     });
   } catch (error) {
     console.error("Failed to log in.", error);
@@ -300,6 +470,11 @@ app.post("/api/auth/password-reset/request", async (req, res) => {
       }
     }
 
+    await recordRequestUsage(req, "auth.password_reset_requested", {
+      userId: reset?.userId || null,
+      metadata: { email },
+    });
+
     res.json(response);
   } catch (error) {
     console.error("Failed to request password reset.", error);
@@ -330,6 +505,9 @@ app.post("/api/auth/password-reset/confirm", async (req, res) => {
     }
 
     clearSessionCookie(res);
+    await recordRequestUsage(req, "auth.password_reset_completed", {
+      userId: reset.userId || null,
+    });
     res.json({ ok: true });
   } catch (error) {
     console.error("Failed to reset password.", error);
@@ -372,7 +550,7 @@ app.post("/api/auth/password-change", requireAuth, async (req, res) => {
 
     const session = await createSession({
       userId: user.id,
-      token: crypto.randomBytes(32).toString("hex"),
+      token: createSessionToken(),
     });
     setSessionCookie(res, session.token);
 
@@ -384,6 +562,7 @@ app.post("/api/auth/password-change", requireAuth, async (req, res) => {
         updatedAt: new Date().toISOString(),
       }),
     });
+    await recordRequestUsage(req, "auth.password_changed", { userId: user.id });
   } catch (error) {
     console.error("Failed to change password.", error);
     res.status(500).json({ error: "Failed to change password." });
@@ -414,11 +593,38 @@ app.get("/api/auth/me", async (req, res) => {
 
     res.json({
       user: safeUser(user),
-      features: getFeatureAvailability(user),
+      features: await getEffectiveFeatureAvailability(user),
     });
   } catch (error) {
     console.error("Failed to fetch current user.", error);
     res.status(500).json({ error: "Failed to fetch current user." });
+  }
+});
+
+app.get("/api/admin/overview", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [analytics, auditEvents, storage, aiStatus, settings, users] =
+      await Promise.all([
+        getAdminAnalytics(String(req.query.range || "7d")),
+        listAdminAuditEvents(10),
+        getStorageHealth(),
+        getEffectiveAiStatus(req.user),
+        getSystemSettings(),
+        listUsersForAdmin(),
+      ]);
+
+    res.json({
+      metrics: analytics.metrics,
+      storage,
+      aiStatus,
+      settings,
+      recentAdminActions: auditEvents,
+      recentUsers: analytics.topUsers.slice(0, 8),
+      totalUsers: users.length,
+    });
+  } catch (error) {
+    console.error("Failed to fetch admin overview.", error);
+    res.status(500).json({ error: "Failed to fetch admin overview." });
   }
 });
 
@@ -432,6 +638,128 @@ app.get("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch admin users." });
   }
 });
+
+app.get("/api/admin/users/:userId", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const detail = await getAdminUserDetail(req.params.userId);
+    if (!detail) {
+      return res.status(404).json({ error: "User not found." });
+    }
+    res.json(detail);
+  } catch (error) {
+    console.error("Failed to fetch admin user detail.", error);
+    res.status(500).json({ error: "Failed to fetch admin user detail." });
+  }
+});
+
+app.post(
+  "/api/admin/users/:userId/password-reset-link",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const target = await getUserById(req.params.userId);
+      if (!target) {
+        return res.status(404).json({ error: "User not found." });
+      }
+
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      const reset = await createPasswordReset({ email: target.email, expiresAt });
+      if (!reset) {
+        return res.status(404).json({ error: "User not found." });
+      }
+      const resetUrl = `${getBaseUrl(req)}/?resetToken=${encodeURIComponent(
+        reset.token,
+      )}`;
+      await recordAdminAuditEvent({
+        adminUserId: req.user.id,
+        action: "admin.password_reset_link_generated",
+        targetUserId: target.id,
+        targetType: "user",
+        targetId: target.id,
+        metadata: { email: target.email },
+      });
+      await recordRequestUsage(req, "admin.password_reset_link_generated", {
+        userId: req.user.id,
+        metadata: { targetUserId: target.id },
+      });
+      res.json({ ok: true, resetUrl, expiresAt });
+    } catch (error) {
+      console.error("Failed to generate admin reset link.", error);
+      res.status(500).json({ error: "Failed to generate reset link." });
+    }
+  },
+);
+
+app.post(
+  "/api/admin/users/:userId/temporary-password",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const target = await getUserById(req.params.userId);
+      const temporaryPassword = String(req.body.temporaryPassword || "");
+      if (!target) {
+        return res.status(404).json({ error: "User not found." });
+      }
+      if (temporaryPassword.length < 8) {
+        return res.status(400).json({
+          error: "Temporary password must be at least 8 characters.",
+        });
+      }
+
+      await changePasswordForUser({
+        userId: target.id,
+        passwordHash: hashPassword(temporaryPassword),
+      });
+      await recordAdminAuditEvent({
+        adminUserId: req.user.id,
+        action: "admin.temp_password_set",
+        targetUserId: target.id,
+        targetType: "user",
+        targetId: target.id,
+      });
+      await recordRequestUsage(req, "admin.temp_password_set", {
+        userId: req.user.id,
+        metadata: { targetUserId: target.id },
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Failed to set temporary password.", error);
+      res.status(500).json({ error: "Failed to set temporary password." });
+    }
+  },
+);
+
+app.post(
+  "/api/admin/users/:userId/invalidate-sessions",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const target = await getUserById(req.params.userId);
+      if (!target) {
+        return res.status(404).json({ error: "User not found." });
+      }
+      await deleteSessionsByUserId(target.id);
+      await recordAdminAuditEvent({
+        adminUserId: req.user.id,
+        action: "admin.sessions_invalidated",
+        targetUserId: target.id,
+        targetType: "user",
+        targetId: target.id,
+      });
+      await recordRequestUsage(req, "admin.sessions_invalidated", {
+        userId: req.user.id,
+        metadata: { targetUserId: target.id },
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      console.error("Failed to invalidate sessions.", error);
+      res.status(500).json({ error: "Failed to invalidate sessions." });
+    }
+  },
+);
 
 app.delete(
   "/api/admin/users/:userId",
@@ -451,6 +779,18 @@ app.delete(
         return res.status(404).json({ error: "User not found." });
       }
 
+      await recordAdminAuditEvent({
+        adminUserId: req.user.id,
+        action: "admin.user_deleted",
+        targetUserId: req.params.userId,
+        targetType: "user",
+        targetId: req.params.userId,
+      });
+      await recordRequestUsage(req, "admin.user_deleted", {
+        userId: req.user.id,
+        metadata: { targetUserId: req.params.userId },
+      });
+
       res.json({ ok: true });
     } catch (error) {
       console.error("Failed to delete user.", error);
@@ -459,9 +799,128 @@ app.delete(
   },
 );
 
+app.get("/api/admin/analytics", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json(await getAdminAnalytics(String(req.query.range || "7d")));
+  } catch (error) {
+    console.error("Failed to fetch admin analytics.", error);
+    res.status(500).json({ error: "Failed to fetch admin analytics." });
+  }
+});
+
+app.get("/api/admin/events", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const eventName =
+      typeof req.query.eventName === "string"
+        ? req.query.eventName.trim() || undefined
+        : undefined;
+    const userId =
+      typeof req.query.userId === "string" ? req.query.userId.trim() || undefined : undefined;
+    const rawRange = typeof req.query.range === "string" ? req.query.range : "7d";
+    const rawSince = typeof req.query.since === "string" ? req.query.since.trim() : "";
+    const sinceCandidate = rawSince || parseRangeStart(rawRange);
+    const parsedSince = sinceCandidate
+      ? (() => {
+          const parsed = new Date(sinceCandidate);
+          return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+        })()
+      : undefined;
+    const rawLimit = Number.parseInt(
+      typeof req.query.limit === "string" ? req.query.limit : "120",
+      10,
+    );
+    const limit =
+      Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : 120;
+
+    const [events, users] = await Promise.all([
+      listUsageEvents({
+        since: parsedSince,
+        limit,
+        userId,
+        eventName,
+      }),
+      listUsersForAdmin(),
+    ]);
+
+    const userById = new Map(users.map((user) => [user.id, user]));
+
+    res.json({
+      total: events.length,
+      events: events.map((event) => {
+        const user = event.userId ? userById.get(event.userId) : null;
+        return {
+          ...event,
+          userEmail: user?.email || null,
+          userName: user?.name || null,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error("Failed to fetch admin event log.", error);
+    res.status(500).json({ error: "Failed to fetch admin event log." });
+  }
+});
+
+app.get("/api/admin/library-endpoints", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    res.json({ endpoints: buildLibraryEndpointRegistry() });
+  } catch (error) {
+    console.error("Failed to fetch library endpoint registry.", error);
+    res.status(500).json({ error: "Failed to fetch library endpoints." });
+  }
+});
+
+app.get("/api/admin/system", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [settings, aiStatus] = await Promise.all([
+      getSystemSettings(),
+      getEffectiveAiStatus(req.user),
+    ]);
+    res.json({ settings, aiStatus });
+  } catch (error) {
+    console.error("Failed to fetch admin system status.", error);
+    res.status(500).json({ error: "Failed to fetch admin system status." });
+  }
+});
+
+app.put("/api/admin/system", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const settings = await updateSystemSettings(
+      {
+        aiEnabledOverride:
+          req.body.aiEnabledOverride === true || req.body.aiEnabledOverride === false
+            ? req.body.aiEnabledOverride
+            : null,
+        outboundApiCallsEnabled:
+          req.body.outboundApiCallsEnabled === false ? false : true,
+      },
+      req.user.id,
+    );
+    await recordAdminAuditEvent({
+      adminUserId: req.user.id,
+      action: "admin.system_toggle_changed",
+      targetType: "system",
+      targetId: "runtime-settings",
+      metadata: settings,
+    });
+    await recordRequestUsage(req, "admin.system_toggle_changed", {
+      userId: req.user.id,
+      metadata: settings,
+    });
+    res.json({
+      settings,
+      aiStatus: await getEffectiveAiStatus(req.user),
+    });
+  } catch (error) {
+    console.error("Failed to update admin system status.", error);
+    res.status(500).json({ error: "Failed to update admin system status." });
+  }
+});
+
 app.get("/api/projects", requireAuth, async (req, res) => {
   try {
     const projects = await listProjectsByOwnerId(req.user.id);
+    await recordRequestUsage(req, "projects.list_viewed");
     res.json(
       await Promise.all(
         projects.map((project) => enrichProject(project, req.user.id)),
@@ -514,6 +973,9 @@ app.post("/api/projects", requireAuth, async (req, res) => {
       "project.created",
       `Created ${project.name}.`,
     );
+    await recordRequestUsage(req, "project.created", {
+      projectId: project.id,
+    });
 
     res.status(201).json(project);
   } catch (error) {
@@ -551,6 +1013,9 @@ app.get("/api/projects/:projectId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Project not found." });
     }
 
+    await recordRequestUsage(req, "project.opened", {
+      projectId: project.id,
+    });
     res.json(await enrichProject(project, req.user.id));
   } catch (error) {
     console.error("Failed to fetch project.", error);
@@ -582,6 +1047,10 @@ app.post("/api/artifacts", requireAuth, async (req, res) => {
         sourceType: "user-authored",
       })),
     );
+    await recordRequestUsage(req, "artifact.unassigned_started", {
+      artifactId: artifact.id,
+      templateId,
+    });
 
     res.status(201).json(await enrichArtifact(null, artifact, req.user.id));
   } catch (error) {
@@ -598,6 +1067,7 @@ app.get("/api/artifacts", requireAuth, async (req, res) => {
     }
 
     const artifacts = await listUnassignedArtifactsByOwnerId(req.user.id);
+    await recordRequestUsage(req, "library.viewed");
     res.json({
       artifacts: await Promise.all(
         artifacts.map((artifact) => enrichArtifact(null, artifact, req.user.id)),
@@ -620,6 +1090,11 @@ app.get("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Artifact not found." });
     }
 
+    await recordRequestUsage(req, "artifact.opened", {
+      artifactId: artifact.id,
+      projectId: artifact.projectId,
+      templateId: artifact.templateId,
+    });
     res.json(await enrichArtifact(artifact.projectId, artifact, req.user.id));
   } catch (error) {
     console.error("Failed to fetch artifact.", error);
@@ -668,6 +1143,11 @@ app.put("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
         sourceType: "user-edited",
       })),
     );
+    await recordRequestUsage(req, "artifact.updated", {
+      artifactId: result.artifact.id,
+      projectId: result.artifact.projectId,
+      templateId: result.artifact.templateId,
+    });
 
     res.json(await enrichArtifact(result.artifact.projectId, result.artifact, req.user.id));
   } catch (error) {
@@ -706,6 +1186,11 @@ app.post("/api/artifacts/:artifactId/assign", requireAuth, async (req, res) => {
       `Assigned ${result.artifact.title}.`,
       { artifactId: result.artifact.id, templateId: result.artifact.templateId },
     );
+    await recordRequestUsage(req, "artifact.assigned", {
+      artifactId: result.artifact.id,
+      projectId,
+      templateId: result.artifact.templateId,
+    });
 
     res.json({
       artifact: await enrichArtifact(projectId, result.artifact, req.user.id),
@@ -744,6 +1229,12 @@ app.get("/api/artifacts/:artifactId/export.md", requireAuth, async (req, res) =>
       project?.name || "unassigned",
     )}-${slugifyFilename(artifact.title)}.md`;
     await recordExport(artifact.id, null, "markdown", req.user.id);
+    await recordRequestUsage(req, "artifact.exported", {
+      artifactId: artifact.id,
+      projectId: artifact.projectId,
+      templateId: artifact.templateId,
+      metadata: { format: "markdown" },
+    });
 
     res.setHeader("Content-Type", "text/markdown; charset=utf-8");
     res.setHeader(
@@ -795,6 +1286,11 @@ app.post(
         `Created ${artifact.title}.`,
         { artifactId: artifact.id, templateId },
       );
+      await recordRequestUsage(req, "artifact.created", {
+        artifactId: artifact.id,
+        projectId: req.params.projectId,
+        templateId,
+      });
       res
         .status(201)
         .json(await enrichArtifact(req.params.projectId, artifact, req.user.id));
@@ -854,6 +1350,11 @@ app.put(
           sourceType: "user-edited",
         })),
       );
+      await recordRequestUsage(req, "artifact.updated", {
+        artifactId: result.artifact.id,
+        projectId: req.params.projectId,
+        templateId: result.artifact.templateId,
+      });
       res.json(
         await enrichArtifact(
           req.params.projectId,
@@ -955,6 +1456,12 @@ app.get(
         "markdown",
         req.user.id,
       );
+      await recordRequestUsage(req, "artifact.exported", {
+        artifactId: artifact.id,
+        projectId: req.params.projectId,
+        templateId: artifact.templateId,
+        metadata: { format: "markdown", version: version?.versionNumber || null },
+      });
 
       res.setHeader("Content-Type", "text/markdown; charset=utf-8");
       res.setHeader(
@@ -972,6 +1479,7 @@ app.get(
 // API Route: Fetch clean summaries for navigation sidebar menu construction
 app.get("/api/templates", async (req, res) => {
   try {
+    await recordRequestUsage(req, "library.viewed");
     res.json(await listTemplates());
   } catch (error) {
     console.error("Failed to read template definitions.", error);
@@ -989,6 +1497,9 @@ app.get("/api/templates/:id", async (req, res) => {
         .status(404)
         .json({ error: "Template workspace matrix target layout not found." });
     }
+    await recordRequestUsage(req, "library.template_opened", {
+      templateId: template.id,
+    });
     res.json(template);
   } catch (error) {
     console.error("Failed to fetch template detail.", error);
@@ -1012,18 +1523,41 @@ app.get("/{*path}", (req, res, next) => {
 
 async function startServer(port = PORT) {
   await initDatabase();
+  await ensureBootstrapAdminReady();
 
-  return app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`ArtifactHub running on port ${port}`);
   });
+
+  // Keep an explicit strong reference to the listener for local dev shells
+  // that otherwise appear to drop back to the prompt immediately.
+  server.ref?.();
+  return server;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+const entryArg = process.argv[1];
+
+if (entryArg && import.meta.url === pathToFileURL(entryArg).href) {
   startServer()
-  .catch((error) => {
-    console.error("Failed to initialize persistence layer.", error);
-    process.exit(1);
-  });
+    .then((server) => {
+      // Keep direct local runs attached in environments where the listener
+      // alone does not reliably hold the Node process open.
+      const keepAlive = setInterval(() => {}, 60_000);
+
+      function shutdown(signal) {
+        server.close(() => {
+          clearInterval(keepAlive);
+          process.exit(signal === "SIGINT" ? 0 : 1);
+        });
+      }
+
+      process.once("SIGINT", () => shutdown("SIGINT"));
+      process.once("SIGTERM", () => shutdown("SIGTERM"));
+    })
+    .catch((error) => {
+      console.error("Failed to initialize persistence layer.", error);
+      process.exit(1);
+    });
 }
 
 export { app, startServer };

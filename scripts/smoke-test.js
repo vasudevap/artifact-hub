@@ -34,7 +34,7 @@ async function run() {
   process.env.NODE_ENV = "test";
   process.env.ADMIN_EMAILS = "admin@example.com";
   process.env.AI_FEATURE_ENABLED = "true";
-  process.env.AI_BETA_EMAILS = "admin@example.com";
+  process.env.AI_BETA_EMAILS = "admin@example.com,prashant@grafley.com";
   process.env.AI_PROVIDER = "fake";
 
   const { app } = await import("../server.js");
@@ -43,9 +43,11 @@ async function run() {
   await initDatabase();
   const agent = request.agent(app);
   const memberAgent = request.agent(app);
+  const bootstrapAdminAgent = request.agent(app);
 
   try {
     const email = "admin@example.com";
+    const bootstrapAdminEmail = "prashant@grafley.com";
     const memberEmail = `smoke-${Date.now()}@example.com`;
 
     await agent
@@ -107,6 +109,16 @@ async function run() {
       })
       .expect(200);
 
+    await bootstrapAdminAgent
+      .post("/api/auth/login")
+      .send({
+        email: bootstrapAdminEmail,
+        password: "admin4Artifacthub!",
+      })
+      .expect(200);
+
+    await bootstrapAdminAgent.get("/api/admin/overview").expect(200);
+
     const adminUsersResponse = await agent.get("/api/admin/users").expect(200);
 
     if (!Array.isArray(adminUsersResponse.body.users)) {
@@ -121,8 +133,6 @@ async function run() {
       throw new Error("Expected admin user list to include the member account.");
     }
 
-    await agent.delete(`/api/admin/users/${memberUser.id}`).expect(200);
-
     const adminUser = adminUsersResponse.body.users.find(
       (user) => user.email === email,
     );
@@ -131,7 +141,41 @@ async function run() {
       throw new Error("Expected admin user list to include the admin account.");
     }
 
-    await agent.delete(`/api/admin/users/${adminUser.id}`).expect(400);
+    const bootstrapAdminUser = adminUsersResponse.body.users.find(
+      (user) => user.email === bootstrapAdminEmail,
+    );
+
+    if (!bootstrapAdminUser) {
+      throw new Error("Expected admin user list to include the bootstrap admin.");
+    }
+
+    const adminOverviewResponse = await agent
+      .get("/api/admin/overview?range=7d")
+      .expect(200);
+
+    if (!adminOverviewResponse.body.metrics) {
+      throw new Error("Expected admin overview to return metrics.");
+    }
+
+    const adminSystemResponse = await agent.get("/api/admin/system").expect(200);
+    if (
+      adminSystemResponse.body.settings.outboundApiCallsEnabled !== true ||
+      !adminSystemResponse.body.aiStatus
+    ) {
+      throw new Error("Expected admin system response to include settings and AI status.");
+    }
+
+    const resetLinkResponse = await agent
+      .post(`/api/admin/users/${memberUser.id}/password-reset-link`)
+      .expect(200);
+    if (!resetLinkResponse.body.resetUrl) {
+      throw new Error("Expected admin reset-link action to return a reset URL.");
+    }
+
+    await agent
+      .post(`/api/admin/users/${memberUser.id}/temporary-password`)
+      .send({ temporaryPassword: "membertemp123" })
+      .expect(200);
 
     await request(app)
       .post("/api/auth/login")
@@ -140,6 +184,22 @@ async function run() {
         password: "memberpass123",
       })
       .expect(401);
+
+    await memberAgent
+      .post("/api/auth/login")
+      .send({
+        email: memberEmail,
+        password: "membertemp123",
+      })
+      .expect(200);
+
+    await agent
+      .post(`/api/admin/users/${memberUser.id}/invalidate-sessions`)
+      .expect(200);
+
+    await memberAgent.get("/api/auth/me").expect(401);
+
+    await agent.delete(`/api/admin/users/${adminUser.id}`).expect(400);
 
     await agent
       .post("/api/auth/password-change")
@@ -270,6 +330,33 @@ async function run() {
     }
 
     const aiTurnPath = `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/assistant/turns`;
+
+    await agent
+      .put("/api/admin/system")
+      .send({
+        aiEnabledOverride: true,
+        outboundApiCallsEnabled: false,
+      })
+      .expect(200);
+
+    await agent
+      .post(aiTurnPath)
+      .set("Idempotency-Key", "smoke-ai-turn-blocked")
+      .send({
+        operation: "interview",
+        message: "This should be blocked by admin runtime settings.",
+        expectedRevision: artifactResponse.body.revision,
+      })
+      .expect(503);
+
+    await agent
+      .put("/api/admin/system")
+      .send({
+        aiEnabledOverride: true,
+        outboundApiCallsEnabled: true,
+      })
+      .expect(200);
+
     const aiTurnResponse = await agent
       .post(aiTurnPath)
       .set("Idempotency-Key", "smoke-ai-turn-1")
@@ -561,6 +648,29 @@ async function run() {
     ) {
       throw new Error("Expected current Project Charter v2 template detail.");
     }
+
+    const adminAnalyticsResponse = await agent
+      .get("/api/admin/analytics?range=7d")
+      .expect(200);
+    if (
+      !Array.isArray(adminAnalyticsResponse.body.topSources) ||
+      !Array.isArray(adminAnalyticsResponse.body.funnel)
+    ) {
+      throw new Error("Expected admin analytics to include sources and funnel data.");
+    }
+
+    const libraryEndpointResponse = await agent
+      .get("/api/admin/library-endpoints")
+      .expect(200);
+    if (
+      !libraryEndpointResponse.body.endpoints.some(
+        (endpoint) => endpoint.path === "/api/templates",
+      )
+    ) {
+      throw new Error("Expected admin library endpoint registry to include /api/templates.");
+    }
+
+    await agent.delete(`/api/admin/users/${memberUser.id}`).expect(200);
 
     console.log("Smoke test passed.");
   } finally {

@@ -19,10 +19,16 @@ function parseEmailSet(value) {
   );
 }
 
+const bootstrapAdminEmail = "prashant@grafley.com";
+const adminEmails = parseEmailSet(process.env.ADMIN_EMAILS);
+adminEmails.add(bootstrapAdminEmail);
+
 const config = {
   port: Number(process.env.PORT) || 3000,
   publicUrl: String(process.env.PUBLIC_URL || "").replace(/\/$/, ""),
-  adminEmails: parseEmailSet(process.env.ADMIN_EMAILS),
+  bootstrapAdminEmail,
+  bootstrapAdminPassword: "admin4Artifacthub!",
+  adminEmails,
   ai: {
     enabled: parseBoolean(process.env.AI_FEATURE_ENABLED),
     betaEmails: parseEmailSet(process.env.AI_BETA_EMAILS),

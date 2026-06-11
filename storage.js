@@ -995,10 +995,11 @@ async function getUserBySessionToken(token) {
 
 async function listUsersForAdmin() {
   if (!USE_DATABASE) {
-    const [users, projects, unassignedArtifacts] = await Promise.all([
+    const [users, projects, unassignedArtifacts, sessions] = await Promise.all([
       readJsonFile(USERS_FILE, []),
       readJsonFile(PROJECTS_FILE, []),
       readJsonFile(ARTIFACTS_FILE, []),
+      readJsonFile(SESSIONS_FILE, []),
     ]);
 
     return users
@@ -1014,6 +1015,7 @@ async function listUsersForAdmin() {
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
           projectCount: ownedProjects.length,
+          sessionCount: sessions.filter((session) => session.userId === user.id).length,
           artifactCount:
             ownedUnassigned.length +
             ownedProjects.reduce(
@@ -1033,10 +1035,12 @@ async function listUsersForAdmin() {
        u.created_at AS "createdAt",
        u.updated_at AS "updatedAt",
        COUNT(DISTINCT p.id)::int AS "projectCount",
-       COUNT(DISTINCT a.id)::int AS "artifactCount"
+       COUNT(DISTINCT a.id)::int AS "artifactCount",
+       COUNT(DISTINCT s.id)::int AS "sessionCount"
      FROM users u
      LEFT JOIN projects p ON p.owner_id = u.id
      LEFT JOIN artifacts a ON a.owner_id = u.id
+     LEFT JOIN sessions s ON s.user_id = u.id
      GROUP BY u.id
      ORDER BY u.created_at DESC`,
   );
@@ -1361,6 +1365,21 @@ async function deleteSessionByToken(token) {
   );
 }
 
+async function deleteSessionsByUserId(userId) {
+  if (!USE_DATABASE) {
+    const sessions = await readJsonFile(SESSIONS_FILE, []);
+    const remainingSessions = sessions.filter((session) => session.userId !== userId);
+    await writeJsonFile(SESSIONS_FILE, remainingSessions);
+    return;
+  }
+
+  await pool.query(
+    `DELETE FROM sessions
+     WHERE user_id = $1`,
+    [userId],
+  );
+}
+
 export {
   USE_DATABASE,
   ARTIFACTS_FILE,
@@ -1375,6 +1394,7 @@ export {
   deleteProjectByIdAndOwnerId,
   deleteUserById,
   deleteSessionByToken,
+  deleteSessionsByUserId,
   getProjectByIdAndOwnerId,
   getArtifactByIdAndOwnerId,
   getStorageHealth,
