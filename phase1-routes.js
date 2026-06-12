@@ -280,13 +280,6 @@ function createPhase1Router(requireAuth) {
         req.params.artifactId,
         req.user.id,
       );
-      if (userMessage) {
-        await addConversationMessage(
-          conversation.id,
-          "user",
-          userMessage,
-        );
-      }
 
       const confirmedContext = (
         (await listContextItems(req.params.projectId, req.user.id)) || []
@@ -390,6 +383,13 @@ function createPhase1Router(requireAuth) {
             req.user.id,
           ),
         };
+        if (userMessage) {
+          await addConversationMessage(
+            conversation.id,
+            "user",
+            userMessage,
+          );
+        }
         await addConversationMessage(
           conversation.id,
           "assistant",

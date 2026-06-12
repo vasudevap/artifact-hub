@@ -3079,6 +3079,7 @@ function ArtifactEditorPage() {
   const [conflict, setConflict] = useState<Artifact | null>(null);
   const [guideInput, setGuideInput] = useState("");
   const [guideMessage, setGuideMessage] = useState("");
+  const [guideMessageTone, setGuideMessageTone] = useState<"error" | "success" | "info">("info");
   const [guidePending, setGuidePending] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<FieldUpdate[]>([]);
   const [assignProjectId, setAssignProjectId] = useState("");
@@ -3186,6 +3187,7 @@ function ArtifactEditorPage() {
     if (!artifact || !guideInput.trim() || !isProjectArtifact) return;
     setGuidePending(true);
     setGuideMessage("");
+    setGuideMessageTone("info");
     try {
       const response = await api<{
         artifact: Artifact;
@@ -3217,10 +3219,16 @@ function ArtifactEditorPage() {
         queryKey: ["conversation", projectId, artifactId],
       });
       if (response.pendingUpdates.length) {
+        setGuideMessageTone("success");
         setGuideMessage(
           `${response.pendingUpdates.length} suggested update${
             response.pendingUpdates.length === 1 ? "" : "s"
           } ready for review.`,
+        );
+      } else {
+        setGuideMessageTone("success");
+        setGuideMessage(
+          "Guide response received. Review the draft updates in the document and continue with the next section.",
         );
       }
     } catch (error) {
@@ -3230,10 +3238,12 @@ function ArtifactEditorPage() {
         error.data.latestArtifact
       ) {
         setConflict(error.data.latestArtifact as Artifact);
+        setGuideMessageTone("error");
         setGuideMessage(
           "The artifact changed in another session. Refresh or resolve the conflict before retrying the Guide.",
         );
       } else {
+        setGuideMessageTone("error");
         setGuideMessage(
           error instanceof Error
             ? error.message
@@ -3404,6 +3414,7 @@ function ArtifactEditorPage() {
                     setGuideInput(event.target.value);
                     if (guideMessage) {
                       setGuideMessage("");
+                      setGuideMessageTone("info");
                     }
                   }}
                   placeholder="Add project detail or ask for help refining a section."
@@ -3416,16 +3427,31 @@ function ArtifactEditorPage() {
                   {guidePending ? "Sending..." : "Send to Guide"}
                 </button>
               </label>
+              {guidePending && (
+                <div className="guide-status guide-status-info">
+                  <strong>Guide is working</strong>
+                  <p>Sending your request and preparing the next recommended update.</p>
+                </div>
+              )}
               {guideMessage && (
-                <p
-                  className={
-                    pendingUpdates.length && !guidePending
-                      ? "form-message success-text"
-                      : "form-message error-text"
-                  }
+                <div
+                  className={`guide-status ${
+                    guideMessageTone === "success"
+                      ? "guide-status-success"
+                      : guideMessageTone === "error"
+                        ? "guide-status-error"
+                        : "guide-status-info"
+                  }`}
                 >
-                  {guideMessage}
-                </p>
+                  <strong>
+                    {guideMessageTone === "success"
+                      ? "Guide updated the draft"
+                      : guideMessageTone === "error"
+                        ? "Guide needs attention"
+                        : "Guide status"}
+                  </strong>
+                  <p>{guideMessage}</p>
+                </div>
               )}
             </>
             ) : (
