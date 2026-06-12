@@ -46,6 +46,29 @@ async function run() {
   const bootstrapAdminAgent = request.agent(app);
 
   try {
+    const healthResponse = await request(app).get("/api/health").expect(200);
+
+    if (healthResponse.body.ok !== true) {
+      throw new Error("Expected health endpoint to report ok=true.");
+    }
+    if (
+      healthResponse.body.runtime?.environment !== "test" ||
+      healthResponse.body.runtime?.ai?.featureEnabled !== true ||
+      healthResponse.body.runtime?.ai?.provider !== "fake"
+    ) {
+      throw new Error("Expected health endpoint to expose the configured test runtime.");
+    }
+    if (testDatabaseUrl) {
+      if (healthResponse.body.storage?.type !== "postgres") {
+        throw new Error("Expected PostgreSQL health when DATABASE_URL is configured.");
+      }
+      if (!healthResponse.body.storage?.migrations?.latestVersion) {
+        throw new Error("Expected PostgreSQL health to include applied migration info.");
+      }
+    } else if (healthResponse.body.storage?.type !== "json") {
+      throw new Error("Expected JSON fallback health without DATABASE_URL.");
+    }
+
     const email = "admin@example.com";
     const bootstrapAdminEmail = "prashant@grafley.com";
     const memberEmail = `smoke-${Date.now()}@example.com`;

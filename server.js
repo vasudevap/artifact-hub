@@ -365,6 +365,14 @@ app.get("/api/health", async (req, res) => {
     res.json({
       ok: true,
       storage,
+      runtime: {
+        environment: process.env.NODE_ENV || "development",
+        ai: {
+          featureEnabled: config.ai.enabled,
+          provider: config.ai.provider,
+          betaAllowlistConfigured: config.ai.betaEmails.size > 0,
+        },
+      },
       timestamp: new Date().toISOString(),
     });
   } catch (error) {

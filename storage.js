@@ -134,15 +134,34 @@ async function getStorageHealth() {
   if (!USE_DATABASE) {
     return {
       type: "json",
+      mode: "local-fallback",
       ok: true,
+      migrations: null,
     };
   }
 
   await pool.query("SELECT 1");
+  const migrationResult = await pool.query(
+    `SELECT version, name, applied_at
+     FROM schema_migrations
+     ORDER BY version DESC
+     LIMIT 1`,
+  );
+  const latestMigration = migrationResult.rows[0] || null;
+  const migrationCountResult = await pool.query(
+    "SELECT COUNT(*)::int AS applied_count FROM schema_migrations",
+  );
 
   return {
     type: "postgres",
+    mode: "primary",
     ok: true,
+    migrations: {
+      appliedCount: Number(migrationCountResult.rows[0]?.applied_count) || 0,
+      latestVersion: latestMigration ? Number(latestMigration.version) : null,
+      latestName: latestMigration?.name || null,
+      latestAppliedAt: latestMigration?.applied_at || null,
+    },
   };
 }
 

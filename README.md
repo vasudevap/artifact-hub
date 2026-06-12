@@ -151,9 +151,12 @@ NODE_ENV=production DATABASE_URL="your-postgres-url" npm run migrate:json-to-db
 ## Deploy To Render
 
 [`render.yaml`](render.yaml) defines the Node web service, PostgreSQL database,
-frontend build, and `DATABASE_URL` connection. Deploy with AI disabled first,
-then set the AI provider variables and an explicit beta allowlist after the
-hosted empty-account flow passes smoke testing.
+frontend build, and `DATABASE_URL` connection. The committed blueprint keeps
+`AI_FEATURE_ENABLED=false` and `AI_PROVIDER=fake` so hosted rollout starts in a
+safe AI-disabled state. After deploy, confirm `/api/health` reports PostgreSQL
+storage and the expected runtime AI settings, then set the real AI provider
+variables and an explicit beta allowlist only after the hosted empty-account
+flow passes smoke testing.
 
 ## Project Structure
 
