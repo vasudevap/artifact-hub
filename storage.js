@@ -933,6 +933,62 @@ async function deleteArtifact({ projectId, artifactId, ownerId }) {
   }
 }
 
+async function deleteOwnedArtifactById({ artifactId, ownerId }) {
+  if (!USE_DATABASE) {
+    const [projects, artifacts] = await Promise.all([
+      readJsonFile(PROJECTS_FILE, []),
+      readJsonFile(ARTIFACTS_FILE, []),
+    ]);
+
+    const unassignedIndex = artifacts.findIndex(
+      (item) => item.id === artifactId && item.ownerId === ownerId,
+    );
+    if (unassignedIndex >= 0) {
+      artifacts.splice(unassignedIndex, 1);
+      await writeJsonFile(ARTIFACTS_FILE, artifacts);
+      return { deleted: true, artifact: null };
+    }
+
+    for (const project of projects.filter((item) => item.ownerId === ownerId)) {
+      const artifactExists = (project.artifacts || []).some(
+        (item) => item.id === artifactId,
+      );
+      if (!artifactExists) continue;
+      project.artifacts = (project.artifacts || []).filter(
+        (item) => item.id !== artifactId,
+      );
+      project.updatedAt = nowIso();
+      await writeJsonFile(PROJECTS_FILE, projects);
+      return { deleted: true, artifact: null };
+    }
+
+    return { deleted: false, artifact: null };
+  }
+
+  const result = await pool.query(
+    `DELETE FROM artifacts
+     WHERE id = $1 AND owner_id = $2
+     RETURNING project_id`,
+    [artifactId, ownerId],
+  );
+
+  if (!result.rowCount) {
+    return { deleted: false, artifact: null };
+  }
+
+  const deletedProjectId = result.rows[0]?.project_id || null;
+  if (deletedProjectId) {
+    await pool.query(
+      `UPDATE projects
+       SET updated_at = $2
+       WHERE id = $1`,
+      [deletedProjectId, nowIso()],
+    );
+  }
+
+  return { deleted: true, artifact: null };
+}
+
 async function getUserByEmail(email) {
   if (!USE_DATABASE) {
     const users = await readJsonFile(USERS_FILE, []);
@@ -1410,6 +1466,7 @@ export {
   createSession,
   createUser,
   deleteArtifact,
+  deleteOwnedArtifactById,
   deleteProjectByIdAndOwnerId,
   deleteUserById,
   deleteSessionByToken,

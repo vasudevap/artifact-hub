@@ -37,6 +37,7 @@ import {
   createSession,
   createUser,
   deleteArtifact,
+  deleteOwnedArtifactById,
   deleteProjectByIdAndOwnerId,
   deleteSessionByToken,
   deleteSessionsByUserId,
@@ -1161,6 +1162,24 @@ app.put("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
   } catch (error) {
     console.error("Failed to update artifact.", error);
     res.status(500).json({ error: "Failed to update artifact." });
+  }
+});
+
+app.delete("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
+  try {
+    const result = await deleteOwnedArtifactById({
+      artifactId: req.params.artifactId,
+      ownerId: req.user.id,
+    });
+
+    if (!result.deleted) {
+      return res.status(404).json({ error: "Artifact not found." });
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to delete artifact.", error);
+    res.status(500).json({ error: "Failed to delete artifact." });
   }
 });
 

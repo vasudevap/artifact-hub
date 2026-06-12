@@ -3119,6 +3119,16 @@ h1 {
   gap: 0.7rem;
 }
 
+.destructive-button {
+  border-color: #efc4bc;
+  color: #b24b3d;
+}
+
+.destructive-button:hover:not(:disabled) {
+  background: #fff4f2;
+  border-color: #e3a79d;
+}
+
 .save-state {
   color: var(--muted);
   font-size: 0.72rem;

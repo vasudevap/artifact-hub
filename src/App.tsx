@@ -3085,6 +3085,8 @@ function ArtifactEditorPage() {
   const [assignProjectId, setAssignProjectId] = useState("");
   const [assignMessage, setAssignMessage] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState("");
+  const [deletePending, setDeletePending] = useState(false);
   const saveTimer = useRef<number | null>(null);
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -3316,6 +3318,40 @@ function ArtifactEditorPage() {
     await assignToProject(project.id);
   }
 
+  async function deleteCurrentArtifact() {
+    if (!artifact) return;
+    const targetLabel = isProjectArtifact
+      ? `${artifact.title} from ${projectQuery.data?.name || "this project"}`
+      : `${artifact.title} draft`;
+    if (!window.confirm(`Delete ${targetLabel}? This cannot be undone.`)) return;
+
+    setDeletePending(true);
+    setDeleteMessage("");
+    try {
+      if (isProjectArtifact) {
+        await api<{ ok: true; project: Project }>(
+          `/api/projects/${projectId}/artifacts/${artifact.id}`,
+          { method: "DELETE" },
+        );
+        await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
+        navigate(`/projects/${projectId}`);
+      } else {
+        await api<{ ok: true }>(`/api/artifacts/${artifact.id}`, {
+          method: "DELETE",
+        });
+        await queryClient.invalidateQueries({ queryKey: ["artifacts", "unassigned"] });
+        navigate("/library");
+      }
+    } catch (error) {
+      setDeleteMessage(
+        error instanceof Error ? error.message : "Unable to delete artifact.",
+      );
+    } finally {
+      setDeletePending(false);
+    }
+  }
+
   if (!artifact || !templateQuery.data) return <PanelLoading label="Opening artifact..." />;
   const template = templateQuery.data;
   const projects = projectsQuery.data || [];
@@ -3336,14 +3372,31 @@ function ArtifactEditorPage() {
           <ProgressRing value={artifact.completeness.percentage} />
           {isProjectArtifact ? (
             <>
+              <button
+                className="secondary-button destructive-button"
+                disabled={deletePending}
+                onClick={deleteCurrentArtifact}
+              >
+                {deletePending ? "Deleting..." : "Delete"}
+              </button>
               <Link className="secondary-button" to={`/projects/${projectId}/artifacts/${artifact.id}/review`}>Review mode</Link>
               <Link className="primary-button" to={`/projects/${projectId}/artifacts/${artifact.id}/export`}>Export</Link>
             </>
           ) : (
-            <a className="primary-button" href={`/api/artifacts/${artifact.id}/export.md`}>Export draft</a>
+            <>
+              <button
+                className="secondary-button destructive-button"
+                disabled={deletePending}
+                onClick={deleteCurrentArtifact}
+              >
+                {deletePending ? "Deleting..." : "Delete"}
+              </button>
+              <a className="primary-button" href={`/api/artifacts/${artifact.id}/export.md`}>Export draft</a>
+            </>
           )}
         </div>
       </header>
+      {deleteMessage && <p className="form-message error-text">{deleteMessage}</p>}
       <div className="editor-layout">
         <section className="document-surface">
           {template.fields.map((field, index) => (
