@@ -3078,6 +3078,8 @@ function ArtifactEditorPage() {
   const [initializedArtifactId, setInitializedArtifactId] = useState("");
   const [conflict, setConflict] = useState<Artifact | null>(null);
   const [guideInput, setGuideInput] = useState("");
+  const [guideMessage, setGuideMessage] = useState("");
+  const [guidePending, setGuidePending] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<FieldUpdate[]>([]);
   const [assignProjectId, setAssignProjectId] = useState("");
   const [assignMessage, setAssignMessage] = useState("");
@@ -3182,35 +3184,65 @@ function ArtifactEditorPage() {
 
   async function sendGuideTurn() {
     if (!artifact || !guideInput.trim() || !isProjectArtifact) return;
-    const response = await api<{
-      artifact: Artifact;
-      pendingUpdates: FieldUpdate[];
-    }>(`/api/projects/${projectId}/artifacts/${artifact.id}/assistant/turns`, {
-      method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
-      json: {
-        message: guideInput,
-        operation: "interview",
-        expectedRevision: artifact.revision,
-      },
-    });
-    setGuideInput("");
-    setPendingUpdates(response.pendingUpdates);
-    setValues(response.artifact.fieldValues);
-    setDirty(false);
-    queryClient.setQueryData<Project>(["project", projectId], (current) =>
-      current
-        ? {
-            ...current,
-            artifacts: current.artifacts.map((item) =>
-              item.id === artifact.id ? response.artifact : item,
-            ),
-          }
-        : current,
-    );
-    await queryClient.invalidateQueries({
-      queryKey: ["conversation", projectId, artifactId],
-    });
+    setGuidePending(true);
+    setGuideMessage("");
+    try {
+      const response = await api<{
+        artifact: Artifact;
+        pendingUpdates: FieldUpdate[];
+      }>(`/api/projects/${projectId}/artifacts/${artifact.id}/assistant/turns`, {
+        method: "POST",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        json: {
+          message: guideInput,
+          operation: "interview",
+          expectedRevision: artifact.revision,
+        },
+      });
+      setGuideInput("");
+      setPendingUpdates(response.pendingUpdates);
+      setValues(response.artifact.fieldValues);
+      setDirty(false);
+      queryClient.setQueryData<Project>(["project", projectId], (current) =>
+        current
+          ? {
+              ...current,
+              artifacts: current.artifacts.map((item) =>
+                item.id === artifact.id ? response.artifact : item,
+              ),
+            }
+          : current,
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["conversation", projectId, artifactId],
+      });
+      if (response.pendingUpdates.length) {
+        setGuideMessage(
+          `${response.pendingUpdates.length} suggested update${
+            response.pendingUpdates.length === 1 ? "" : "s"
+          } ready for review.`,
+        );
+      }
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.data.latestArtifact
+      ) {
+        setConflict(error.data.latestArtifact as Artifact);
+        setGuideMessage(
+          "The artifact changed in another session. Refresh or resolve the conflict before retrying the Guide.",
+        );
+      } else {
+        setGuideMessage(
+          error instanceof Error
+            ? error.message
+            : "ArtifactHub Guide could not complete that turn.",
+        );
+      }
+    } finally {
+      setGuidePending(false);
+    }
   }
 
   async function acceptPending() {
@@ -3367,11 +3399,34 @@ function ArtifactEditorPage() {
                   rows={4}
                   maxLength={8000}
                   value={guideInput}
-                  onChange={(event) => setGuideInput(event.target.value)}
+                  disabled={guidePending}
+                  onChange={(event) => {
+                    setGuideInput(event.target.value);
+                    if (guideMessage) {
+                      setGuideMessage("");
+                    }
+                  }}
                   placeholder="Add project detail or ask for help refining a section."
                 />
-                <button className="primary-button" onClick={sendGuideTurn}>Send to Guide</button>
+                <button
+                  className="primary-button"
+                  disabled={guidePending || !guideInput.trim()}
+                  onClick={sendGuideTurn}
+                >
+                  {guidePending ? "Sending..." : "Send to Guide"}
+                </button>
               </label>
+              {guideMessage && (
+                <p
+                  className={
+                    pendingUpdates.length && !guidePending
+                      ? "form-message success-text"
+                      : "form-message error-text"
+                  }
+                >
+                  {guideMessage}
+                </p>
+              )}
             </>
             ) : (
             <div className="guide-focus">
