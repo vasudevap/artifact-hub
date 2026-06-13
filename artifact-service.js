@@ -114,7 +114,7 @@ async function buildProjectRecommendations(project, ownerId) {
       type: "start-charter",
       title: "Start the Project Charter",
       action: "Create charter",
-      href: `/projects/${project.id}/library`,
+      href: `/projects/${project.id}/artifacts/new/project-charter`,
     };
   }
 

@@ -69,7 +69,7 @@ async function run() {
     await page.getByRole("button", { name: "Create account" }).click();
     await page.getByLabel("Name", { exact: true }).fill("Browser Test");
     await page.getByLabel("Email", { exact: true }).fill(testEmail);
-    await page.getByLabel("Password", { exact: true }).fill("browser-pass-123");
+    await page.getByLabel(/Password/).fill("browser-pass-123");
     await page.getByRole("button", { name: "Create account" }).click();
 
     const initialGlobalRail = page.getByRole("navigation", {
@@ -209,13 +209,7 @@ async function run() {
       .click();
 
     await page.getByRole("heading", { name: "Project Context" }).waitFor();
-    await page
-      .getByRole("button", { name: "Projects, 1 project" })
-      .waitFor();
-    await page
-      .getByRole("navigation", { name: "Projects list" })
-      .getByRole("link", { name: /E2E Project/ })
-      .waitFor();
+    await page.getByText("Current project").waitFor();
     await page
       .getByRole("navigation", { name: "E2E Project sections" })
       .getByRole("link", { name: "Project Context" })
@@ -384,8 +378,10 @@ async function run() {
     await page.getByRole("heading", { name: "Sign in to ArtifactHub" }).waitFor();
     assert.match(page.url(), /\/auth$/);
     await page.getByLabel("Email", { exact: true }).fill(testEmail);
-    await page.getByLabel("Password", { exact: true }).fill("browser-pass-123");
+    await page.getByLabel(/Password/).fill("browser-pass-123");
     await page.getByRole("button", { name: "Sign in" }).click();
+    await initialGlobalRail.waitFor();
+    await projectsRailLink.click();
     await page.getByRole("heading", { name: "Projects" }).waitFor();
     await page.getByPlaceholder("Search projects...").waitFor();
     assert.equal(await projectsRailLink.getAttribute("aria-current"), "page");

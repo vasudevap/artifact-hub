@@ -54,6 +54,7 @@ const canonicalContextFieldMap = {
 function createPhase1Router(requireAuth) {
   const router = express.Router();
   router.use(requireAuth);
+  const scopeOnlyContextPromptPattern = /confirmed project context only/i;
 
   function requestClientContext(req) {
     const localHour = Number.parseInt(
@@ -105,6 +106,19 @@ function createPhase1Router(requireAuth) {
     timestamps.push(Date.now());
     turnHistory.set(userId, timestamps);
     return false;
+  }
+
+  function buildScopeContextFallbackResult(result) {
+    return {
+      ...result,
+      assistantMessage:
+        "Confirmed scope boundaries are not available yet. Add or confirm them in Project Context before the Guide drafts the Scope section.",
+      workflow: {
+        stage: "interview",
+        nextAction:
+          "Confirm scope boundaries in Project Context or provide them directly before drafting Scope.",
+      },
+    };
   }
 
   async function syncProjectFromContextItems(projectId, ownerId, items) {
@@ -338,6 +352,39 @@ function createPhase1Router(requireAuth) {
           conversation: conversation.messages,
           userMessage,
         });
+        const confirmedContextKeys = new Set(
+          confirmedContext.map((item) => item.key),
+        );
+        const blockScopeInference =
+          scopeOnlyContextPromptPattern.test(userMessage) &&
+          !confirmedContextKeys.has("scope");
+        const blockedScopeUpdates = new Set();
+        if (blockScopeInference) {
+          for (const update of output.result.fieldUpdates) {
+            if (update.fieldId === "scope") {
+              blockedScopeUpdates.add(update.fieldId);
+            }
+          }
+        }
+        const fieldUpdates = output.result.fieldUpdates.filter(
+          (update) => !blockedScopeUpdates.has(update.fieldId),
+        );
+        const contextCandidates = output.result.contextCandidates.filter(
+          (candidate) =>
+            !(blockScopeInference && candidate.key === "scope"),
+        );
+        const result =
+          blockedScopeUpdates.size > 0
+            ? buildScopeContextFallbackResult({
+                ...output.result,
+                fieldUpdates,
+                contextCandidates,
+              })
+            : {
+                ...output.result,
+                fieldUpdates,
+                contextCandidates,
+              };
         const provenance = await getProvenance(owned.artifact.id);
         const provenanceByField = new Map(
           provenance.map((item) => [item.fieldId, item.sourceType]),
@@ -345,7 +392,7 @@ function createPhase1Router(requireAuth) {
         const autoUpdates = [];
         const pendingUpdates = [];
 
-        for (const update of output.result.fieldUpdates) {
+        for (const update of result.fieldUpdates) {
           if (!template.fields.some((field) => field.id === update.fieldId)) {
             continue;
           }
@@ -377,7 +424,7 @@ function createPhase1Router(requireAuth) {
             status: owned.artifact.status,
             fieldValues,
             expectedRevision: owned.artifact.revision,
-            workflowStage: output.result.workflow.stage,
+            workflowStage: result.workflow.stage,
           });
           if (updated.stale) {
             return res.status(409).json({
@@ -397,11 +444,11 @@ function createPhase1Router(requireAuth) {
           );
         }
 
-        if (output.result.contextCandidates.length) {
+        if (result.contextCandidates.length) {
           await upsertContextItems(
             req.params.projectId,
             req.user.id,
-            output.result.contextCandidates.map((candidate) => ({
+            result.contextCandidates.map((candidate) => ({
               ...candidate,
               trustState: "proposed",
               sourceType: "ai",
@@ -411,7 +458,7 @@ function createPhase1Router(requireAuth) {
         }
 
         const responseBody = {
-          ...output.result,
+          ...result,
           autoUpdates,
           pendingUpdates,
           artifact: await enrichArtifact(
@@ -430,8 +477,8 @@ function createPhase1Router(requireAuth) {
         await addConversationMessage(
           conversation.id,
           "assistant",
-          output.result.assistantMessage,
-          { autoUpdates, pendingUpdates, workflow: output.result.workflow },
+          result.assistantMessage,
+          { autoUpdates, pendingUpdates, workflow: result.workflow },
         );
         await saveAiRun({
           ownerId: req.user.id,

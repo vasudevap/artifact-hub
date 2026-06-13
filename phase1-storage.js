@@ -101,6 +101,14 @@ async function listContextItems(projectId, ownerId) {
   return result.rows.map(mapContextRow);
 }
 
+function shouldPreserveConfirmedContextItem(existing, incoming) {
+  return (
+    existing?.trustState === "confirmed" &&
+    incoming?.trustState === "proposed" &&
+    incoming?.sourceType === "ai"
+  );
+}
+
 async function upsertContextItems(projectId, ownerId, items) {
   if (!(await assertProjectOwner(projectId, ownerId))) {
     return null;
@@ -133,11 +141,15 @@ async function upsertContextItems(projectId, ownerId, items) {
           candidate.key === item.key,
       );
       if (index >= 0) {
+        const existing = state.contextItems[index];
+        if (shouldPreserveConfirmedContextItem(existing, item)) {
+          continue;
+        }
         state.contextItems[index] = {
-          ...state.contextItems[index],
+          ...existing,
           ...item,
-          id: state.contextItems[index].id,
-          createdAt: state.contextItems[index].createdAt,
+          id: existing.id,
+          createdAt: existing.createdAt,
         };
       } else {
         state.contextItems.push(item);
@@ -158,12 +170,48 @@ async function upsertContextItems(projectId, ownerId, items) {
          )
          VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)
          ON CONFLICT (project_id, category, item_key) DO UPDATE
-         SET label = EXCLUDED.label,
-             value = EXCLUDED.value,
-             trust_state = EXCLUDED.trust_state,
-             source_type = EXCLUDED.source_type,
-             source_record_id = EXCLUDED.source_record_id,
-             updated_at = EXCLUDED.updated_at`,
+         SET label = CASE
+               WHEN project_context_items.trust_state = 'confirmed'
+                 AND EXCLUDED.trust_state = 'proposed'
+                 AND EXCLUDED.source_type = 'ai'
+               THEN project_context_items.label
+               ELSE EXCLUDED.label
+             END,
+             value = CASE
+               WHEN project_context_items.trust_state = 'confirmed'
+                 AND EXCLUDED.trust_state = 'proposed'
+                 AND EXCLUDED.source_type = 'ai'
+               THEN project_context_items.value
+               ELSE EXCLUDED.value
+             END,
+             trust_state = CASE
+               WHEN project_context_items.trust_state = 'confirmed'
+                 AND EXCLUDED.trust_state = 'proposed'
+                 AND EXCLUDED.source_type = 'ai'
+               THEN project_context_items.trust_state
+               ELSE EXCLUDED.trust_state
+             END,
+             source_type = CASE
+               WHEN project_context_items.trust_state = 'confirmed'
+                 AND EXCLUDED.trust_state = 'proposed'
+                 AND EXCLUDED.source_type = 'ai'
+               THEN project_context_items.source_type
+               ELSE EXCLUDED.source_type
+             END,
+             source_record_id = CASE
+               WHEN project_context_items.trust_state = 'confirmed'
+                 AND EXCLUDED.trust_state = 'proposed'
+                 AND EXCLUDED.source_type = 'ai'
+               THEN project_context_items.source_record_id
+               ELSE EXCLUDED.source_record_id
+             END,
+             updated_at = CASE
+               WHEN project_context_items.trust_state = 'confirmed'
+                 AND EXCLUDED.trust_state = 'proposed'
+                 AND EXCLUDED.source_type = 'ai'
+               THEN project_context_items.updated_at
+               ELSE EXCLUDED.updated_at
+             END`,
         [
           item.id,
           projectId,

@@ -30,6 +30,15 @@ import {
 } from "react-router-dom";
 import { z } from "zod";
 import { api, ApiError, formatDate, formatDateTime } from "./api";
+import { StageFlowBoard } from "./features/project-workspace/StageFlowBoard";
+import {
+  buildProjectWorkspaceStages,
+} from "./features/project-workspace/model";
+import {
+  buildTemplateStageGroups,
+  sortTemplatesForWorkflow,
+  type TemplateStageGroup,
+} from "./features/templates/stage-groups";
 import type {
   Activity,
   AdminAnalytics,
@@ -121,12 +130,16 @@ function App() {
             <Route path="/projects" element={<ProjectsShell />}>
               <Route index element={<ProjectsPage />} />
               <Route path=":projectId" element={<ProjectWorkspaceShell />}>
-                <Route index element={<ProjectOverviewPage />} />
-                <Route path="context" element={<ProjectContextPage />} />
-                <Route path="library" element={<Navigate to="/library" replace />} />
-                <Route
-                  path="artifacts/:artifactId"
-                  element={<ArtifactEditorPage />}
+              <Route index element={<ProjectOverviewPage />} />
+              <Route path="context" element={<ProjectContextPage />} />
+              <Route path="library" element={<Navigate to="/library" replace />} />
+              <Route
+                path="artifacts/new/:templateId"
+                element={<ProjectArtifactStarterPage />}
+              />
+              <Route
+                path="artifacts/:artifactId"
+                element={<ArtifactEditorPage />}
                 />
                 <Route
                   path="artifacts/:artifactId/review"
@@ -2456,6 +2469,8 @@ function useProject() {
 
 function ProjectOverviewPage() {
   const { projectId, project, deleteProject } = useProject();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const activityQuery = useQuery({
     queryKey: ["activity", projectId],
     queryFn: () =>
@@ -2475,6 +2490,48 @@ function ProjectOverviewPage() {
         items: ContextItem[];
         completeness: { percentage: number; missingKeys: string[] };
       }>(`/api/projects/${projectId}/context`),
+  });
+  const templatesQuery = useQuery({
+    queryKey: ["templates"],
+    queryFn: () => api<Template[]>("/api/templates"),
+  });
+  const stages = buildProjectWorkspaceStages(
+    projectId,
+    templatesQuery.data || [],
+    project?.artifacts || [],
+    recommendationQuery.data?.recommendation,
+  );
+  const [expandedStageKey, setExpandedStageKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (expandedStageKey && !stages.some((stage) => stage.key === expandedStageKey)) {
+      setExpandedStageKey(null);
+    }
+  }, [expandedStageKey, stages]);
+
+  useEffect(() => {
+    setExpandedStageKey(null);
+  }, [projectId]);
+
+  const startArtifactMutation = useMutation({
+    mutationFn: async (template: Template) =>
+      api<Artifact>(`/api/projects/${projectId}/artifacts`, {
+        method: "POST",
+        json: {
+          templateId: template.id,
+          title: template.title,
+          fieldValues: {},
+        },
+      }),
+    onSuccess: async (artifact) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["project", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["projects"] }),
+        queryClient.invalidateQueries({ queryKey: ["recommendation", projectId] }),
+        queryClient.invalidateQueries({ queryKey: ["activity", projectId] }),
+      ]);
+      navigate(`/projects/${projectId}/artifacts/${artifact.id}`);
+    },
   });
 
   if (!project) return <PanelLoading label="Loading workspace..." />;
@@ -2506,7 +2563,6 @@ function ProjectOverviewPage() {
             >
               Delete
             </button>
-            <Link className="primary-button" to="/library">+ Create artifact</Link>
           </div>
         }
       />
@@ -2530,23 +2586,54 @@ function ProjectOverviewPage() {
       )}
       <section className="section-heading">
         <div>
-          <h2>Artifacts</h2>
-          <p>Create, review, and export the core documents for this project.</p>
+          <h2>Project flow</h2>
+          <p>Move through each delivery stage without leaving this workspace.</p>
         </div>
-        <Link className="secondary-button" to="/library">Browse library</Link>
       </section>
-      <section className="artifact-card-grid">
-        {project.artifacts.map((artifact) => (
-          <ArtifactCard projectId={project.id} artifact={artifact} key={artifact.id} />
-        ))}
-        {!project.artifacts.length && (
-          <EmptyState
-            title="No artifacts yet"
-            body="Start with the Project Charter to establish the flagship project narrative."
-            action={<Link className="primary-button" to="/library">Choose an artifact</Link>}
-          />
-        )}
-      </section>
+      {startArtifactMutation.isError && (
+        <div className="inline-feedback error-text" role="alert">
+          {startArtifactMutation.error instanceof Error
+            ? startArtifactMutation.error.message
+            : "Unable to start this artifact right now."}
+        </div>
+      )}
+      {templatesQuery.isLoading ? (
+        <PanelLoading label="Loading project flow..." />
+      ) : templatesQuery.data?.length ? (
+        <StageFlowBoard
+          expandedStageKey={expandedStageKey}
+          onStartTemplate={(template) => startArtifactMutation.mutate(template)}
+          onToggleStage={(stageKey) =>
+            setExpandedStageKey((current) => (current === stageKey ? null : stageKey))
+          }
+          stages={stages}
+          startingTemplateId={startArtifactMutation.variables?.id || null}
+        />
+      ) : (
+        <EmptyState
+          title="Project stages are unavailable"
+          body="Templates could not be loaded for this workspace."
+        />
+      )}
+      {project.artifacts.length > 0 && (
+        <>
+          <section className="section-heading">
+            <div>
+              <h2>Assigned artifacts</h2>
+              <p>Continue drafting, review open findings, or open approved work.</p>
+            </div>
+          </section>
+          <section className="artifact-card-grid">
+            {project.artifacts.map((artifact) => (
+              <ArtifactCard
+                projectId={project.id}
+                artifact={artifact}
+                key={artifact.id}
+              />
+            ))}
+          </section>
+        </>
+      )}
       <section className="overview-bottom-grid">
         <article className="surface-panel">
           <div className="panel-heading">
@@ -2626,6 +2713,43 @@ const contextDefinitions = [
   ["scope-constraints", "constraints", "Delivery constraints"],
   ["objectives-outcomes", "success-metrics", "Success metrics"],
 ] as const;
+
+function hasReviewableContextValue(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasReviewableContextValue(entry));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).some((entry) => hasReviewableContextValue(entry));
+  }
+  return value !== null && value !== undefined;
+}
+
+function formatContextValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim() || "No value supplied";
+  }
+  if (Array.isArray(value)) {
+    const rendered = value
+      .map((entry) => formatContextValue(entry))
+      .filter((entry) => entry !== "No value supplied");
+    return rendered.length ? rendered.join("; ") : "No value supplied";
+  }
+  if (value && typeof value === "object") {
+    const rendered = Object.entries(value)
+      .map(([key, entry]) => {
+        const next = formatContextValue(entry);
+        return next === "No value supplied"
+          ? null
+          : `${key.replace(/([A-Z])/g, " $1").trim()}: ${next}`;
+      })
+      .filter(Boolean);
+    return rendered.length ? rendered.join(" | ") : "No value supplied";
+  }
+  return value == null ? "No value supplied" : String(value);
+}
 
 function ProjectContextPage() {
   const { projectId, project } = useProject();
@@ -2707,6 +2831,9 @@ function ProjectContextPage() {
   if (!project || contextQuery.isLoading) return <PanelLoading label="Loading project context..." />;
   const items = contextQuery.data?.items || [];
   const proposed = items.filter((item) => item.trustState === "proposed");
+  const reviewableProposed = proposed.filter((item) =>
+    hasReviewableContextValue(item.value),
+  );
 
   return (
     <main className="page-frame with-guide">
@@ -2725,14 +2852,14 @@ function ProjectContextPage() {
         <section className="metric-grid compact-metrics">
           <Metric label="Context completeness" value={`${contextQuery.data?.completeness.percentage || 0}%`} tone="teal" />
           <Metric label="Confirmed fields" value={items.filter((item) => item.trustState === "confirmed").length} tone="green" />
-          <Metric label="Fields need review" value={proposed.length} tone="amber" />
+          <Metric label="Fields need review" value={reviewableProposed.length} tone="amber" />
         </section>
-        {proposed.length > 0 && (
+        {reviewableProposed.length > 0 && (
           <section className="review-callout">
             <h3>Recommended context updates</h3>
-            {proposed.map((item) => (
+            {reviewableProposed.map((item) => (
               <div key={item.id} className="review-context-row">
-                <div><strong>{item.label}</strong><span>{String(item.value || "No value supplied")}</span></div>
+                <div><strong>{item.label}</strong><span>{formatContextValue(item.value)}</span></div>
                 <button onClick={() => changeTrust(item, "confirm")}>Confirm</button>
                 <button onClick={() => changeTrust(item, "reject")}>Reject</button>
               </div>
@@ -2792,20 +2919,12 @@ function ProjectContextPage() {
 
 type LibraryShellContext = {
   filter: string;
-  stageGroups: LibraryStage[];
+  stageGroups: TemplateStageGroup[];
   filteredTemplates: Template[];
-  activeStage: LibraryStage | null;
+  activeStage: TemplateStageGroup | null;
   selected: Template | null;
   setSelected: (template: Template | null) => void;
   templatesLoading: boolean;
-};
-
-type LibraryStage = {
-  key: string;
-  name: string;
-  order: number;
-  useWhen: string;
-  templates: Template[];
 };
 
 function LibraryShell() {
@@ -2822,30 +2941,8 @@ function LibraryShell() {
     queryKey: ["artifacts", "unassigned"],
     queryFn: () => api<{ artifacts: Artifact[] }>("/api/artifacts?scope=unassigned"),
   });
-  const templates = [...(templatesQuery.data || [])].sort(
-    (left, right) =>
-      left.stageOrder - right.stageOrder ||
-      left.title.localeCompare(right.title),
-  );
-  const stageGroups = Array.from(
-    templates
-      .reduce((groups, template) => {
-        const existing = groups.get(template.stageKey);
-        const group =
-          existing ||
-          {
-            key: template.stageKey,
-            name: template.stageName,
-            order: template.stageOrder,
-            useWhen: template.stageUseWhen,
-            templates: [],
-          };
-        group.templates.push(template);
-        groups.set(template.stageKey, group);
-        return groups;
-      }, new Map<string, LibraryStage>())
-      .values(),
-  ).sort((left, right) => left.order - right.order);
+  const templates = sortTemplatesForWorkflow(templatesQuery.data || []);
+  const stageGroups = buildTemplateStageGroups(templates);
   const normalizedTemplateSearch = searchTerm.trim().toLowerCase();
   const visibleStageGroups = stageGroups
     .map((stage) => ({
@@ -2882,13 +2979,13 @@ function LibraryShell() {
         : activeStage?.templates || [];
 
   const drafts = draftsQuery.data?.artifacts || [];
-  const isSelectedStage = (stage: LibraryStage) =>
+  const isSelectedStage = (stage: TemplateStageGroup) =>
     Boolean(selected && stage.templates.some((template) => template.id === selected.id));
-  const isStageExpanded = (stage: LibraryStage) =>
+  const isStageExpanded = (stage: TemplateStageGroup) =>
     normalizedTemplateSearch
       ? true
       : expandedStages[stage.key] ?? isSelectedStage(stage);
-  const toggleStage = (stage: LibraryStage) => {
+  const toggleStage = (stage: TemplateStageGroup) => {
     if (normalizedTemplateSearch) return;
     setExpandedStages((current) => ({
       ...current,
@@ -3152,6 +3249,72 @@ function ArtifactLibraryPage() {
       </div>
     </main>
   );
+}
+
+function ProjectArtifactStarterPage() {
+  const { projectId = "" } = useProject();
+  const { templateId = "" } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [errorMessage, setErrorMessage] = useState("");
+  const [attempted, setAttempted] = useState(false);
+
+  useEffect(() => {
+    if (attempted || !projectId || !templateId) return;
+    setAttempted(true);
+
+    void (async () => {
+      try {
+        const template = await api<Template>(`/api/templates/${templateId}`);
+        const artifact = await api<Artifact>(
+          `/api/projects/${projectId}/artifacts`,
+          {
+            method: "POST",
+            json: {
+              templateId,
+              title: template.title,
+              fieldValues: {},
+            },
+          },
+        );
+        await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
+        await queryClient.invalidateQueries({ queryKey: ["recommendation", projectId] });
+        navigate(`/projects/${projectId}/artifacts/${artifact.id}`, { replace: true });
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Unable to start the Project Charter.",
+        );
+      }
+    })();
+  }, [attempted, navigate, projectId, queryClient, templateId]);
+
+  if (errorMessage) {
+    return (
+      <main className="page-frame">
+        <EmptyState
+          title="Unable to start the Project Charter"
+          body={errorMessage}
+          action={
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => {
+                setErrorMessage("");
+                setAttempted(false);
+              }}
+            >
+              Try again
+            </button>
+          }
+        />
+      </main>
+    );
+  }
+
+  return <PanelLoading label="Starting the Project Charter..." />;
 }
 
 function ArtifactEditorPage() {
@@ -3550,7 +3713,7 @@ function ArtifactEditorPage() {
           </div>
           {isProjectArtifact ? (
             features.aiAssistant ? (
-            <>
+            <div className="guide-thread">
               <div className="guide-focus">
                 <span className="recommendation-icon">◎</span>
                 <h3>
@@ -3571,64 +3734,70 @@ function ArtifactEditorPage() {
                   </div>
                 ))}
               </div>
-              {pendingUpdates.length > 0 && (
-                <div className="pending-update">
-                  <strong>{pendingUpdates.length} update requires acceptance</strong>
-                  <p>Your existing wording will not be replaced automatically.</p>
-                  <button className="primary-button" onClick={acceptPending}>Accept suggested update</button>
-                </div>
-              )}
-              <label className="guide-composer">
-                <span>Answer the Guide</span>
-                <textarea
-                  rows={4}
-                  maxLength={8000}
-                  value={guideInput}
-                  disabled={guidePending}
-                  onChange={(event) => {
-                    setGuideInput(event.target.value);
-                    if (guideMessage) {
-                      setGuideMessage("");
-                      setGuideMessageTone("info");
-                    }
-                  }}
-                  placeholder="Add project detail or ask for help refining a section."
-                />
-                <button
-                  className="primary-button"
-                  disabled={guidePending || !guideInput.trim()}
-                  onClick={sendGuideTurn}
-                >
-                  {guidePending ? "Sending..." : "Send to Guide"}
-                </button>
-              </label>
-              {guidePending && (
-                <div className="guide-status guide-status-info">
-                  <strong>Guide is working</strong>
-                  <p>Sending your request and preparing the next recommended update.</p>
-                </div>
-              )}
-              {guideMessage && (
-                <div
-                  className={`guide-status ${
-                    guideMessageTone === "success"
-                      ? "guide-status-success"
-                      : guideMessageTone === "error"
-                        ? "guide-status-error"
-                        : "guide-status-info"
-                  }`}
-                >
-                  <strong>
-                    {guideMessageTone === "success"
-                      ? "Guide updated the draft"
-                      : guideMessageTone === "error"
-                        ? "Guide needs attention"
-                        : "Guide status"}
-                  </strong>
-                  <p>{guideMessage}</p>
-                </div>
-              )}
-            </>
+              <div className="guide-composer-shell">
+                {pendingUpdates.length > 0 && (
+                  <div className="pending-update">
+                    <strong>{pendingUpdates.length} update requires acceptance</strong>
+                    <p>Your existing wording will not be replaced automatically.</p>
+                    <button className="primary-button" onClick={acceptPending}>Accept suggested update</button>
+                  </div>
+                )}
+                <label className="guide-composer">
+                  <span>Answer the Guide</span>
+                  <textarea
+                    rows={4}
+                    maxLength={8000}
+                    value={guideInput}
+                    disabled={guidePending}
+                    onChange={(event) => {
+                      setGuideInput(event.target.value);
+                      if (guideMessage) {
+                        setGuideMessage("");
+                        setGuideMessageTone("info");
+                      }
+                    }}
+                    placeholder="Add project detail or ask for help refining a section."
+                  />
+                  <button
+                    className="primary-button"
+                    disabled={guidePending || !guideInput.trim()}
+                    onClick={sendGuideTurn}
+                  >
+                    {guidePending ? "Sending..." : "Send to Guide"}
+                  </button>
+                </label>
+                {(guidePending || guideMessage) && (
+                  <div className="guide-status-stack">
+                    {guidePending && (
+                      <div className="guide-status guide-status-info">
+                        <strong>Guide is working</strong>
+                        <p>Sending your request and preparing the next recommended update.</p>
+                      </div>
+                    )}
+                    {guideMessage && (
+                      <div
+                        className={`guide-status ${
+                          guideMessageTone === "success"
+                            ? "guide-status-success"
+                            : guideMessageTone === "error"
+                              ? "guide-status-error"
+                              : "guide-status-info"
+                        }`}
+                      >
+                        <strong>
+                          {guideMessageTone === "success"
+                            ? "Guide updated the draft"
+                            : guideMessageTone === "error"
+                              ? "Guide needs attention"
+                              : "Guide status"}
+                        </strong>
+                        <p>{guideMessage}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
             ) : (
             <div className="guide-focus">
               <span className="recommendation-icon">◎</span>

@@ -325,6 +325,56 @@ async function run() {
       )
       .expect(200);
 
+    const remainingContextResponse = await agent
+      .patch(`/api/projects/${projectResponse.body.id}/context`)
+      .send({
+        items: [
+          {
+            category: "team-stakeholders",
+            key: "stakeholders",
+            label: "Key stakeholders",
+            value: "Program sponsor, PM, intake lead, and operations manager.",
+            trustState: "confirmed",
+            sourceType: "user",
+          },
+          {
+            category: "scope-constraints",
+            key: "constraints",
+            label: "Delivery constraints",
+            value: "Launch must fit the current quarter release window.",
+            trustState: "confirmed",
+            sourceType: "user",
+          },
+          {
+            category: "objectives-outcomes",
+            key: "success-metrics",
+            label: "Success metrics",
+            value: "Reduce intake cycle time by 30%.",
+            trustState: "confirmed",
+            sourceType: "user",
+          },
+        ],
+      })
+      .expect(200);
+
+    if (remainingContextResponse.body.completeness.percentage !== 100) {
+      throw new Error("Expected reusable project context to reach 100% completeness.");
+    }
+
+    const preCharterRecommendation = await agent
+      .get(`/api/projects/${projectResponse.body.id}/recommendation`)
+      .expect(200);
+
+    if (
+      preCharterRecommendation.body.recommendation?.type !== "start-charter" ||
+      preCharterRecommendation.body.recommendation?.href !==
+        `/projects/${projectResponse.body.id}/artifacts/new/project-charter`
+    ) {
+      throw new Error(
+        "Expected the project recommendation to start the Project Charter inside the project workspace.",
+      );
+    }
+
     const artifactResponse = await agent
       .post(`/api/projects/${projectResponse.body.id}/artifacts`)
       .send({
@@ -353,6 +403,123 @@ async function run() {
     }
 
     const aiTurnPath = `/api/projects/${projectResponse.body.id}/artifacts/${artifactResponse.body.id}/assistant/turns`;
+
+    const provenanceArtifactResponse = await agent
+      .post(`/api/projects/${projectResponse.body.id}/artifacts`)
+      .send({
+        templateId: "project-charter",
+        title: "Provenance Check Charter",
+        fieldValues: {
+          project_overview: "Keep the current guided intake flow aligned.",
+          objectives: ["Reduce intake cycle time by 30%."],
+        },
+      })
+      .expect(201);
+
+    const provenanceConversationResponse = await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/artifacts/${provenanceArtifactResponse.body.id}/conversations`,
+      )
+      .send({ operation: "interview" })
+      .expect(201);
+
+    if (!provenanceConversationResponse.body.id) {
+      throw new Error("Expected provenance verification conversation to be created.");
+    }
+
+    const provenanceTurnResponse = await agent
+      .post(
+        `/api/projects/${projectResponse.body.id}/artifacts/${provenanceArtifactResponse.body.id}/assistant/turns`,
+      )
+      .set("Idempotency-Key", "smoke-ai-provenance")
+      .send({
+        operation: "interview",
+        message: "Capture the confirmed scope boundaries for this charter.",
+        expectedRevision: provenanceArtifactResponse.body.revision,
+      })
+      .expect(200);
+
+    if (provenanceTurnResponse.body.autoUpdates[0]?.fieldId !== "scope") {
+      throw new Error("Expected the provenance verification turn to target scope.");
+    }
+
+    const preservedContextResponse = await agent
+      .get(`/api/projects/${projectResponse.body.id}/context`)
+      .expect(200);
+    const preservedScopeItem = preservedContextResponse.body.items.find(
+      (item) => item.key === "scope",
+    );
+
+    if (
+      !preservedScopeItem ||
+      preservedScopeItem.trustState !== "confirmed" ||
+      preservedScopeItem.sourceType !== "user"
+    ) {
+      throw new Error(
+        "Expected confirmed user scope context to keep its trust state and provenance after AI suggestions.",
+      );
+    }
+
+    const scopeGuardProjectResponse = await agent
+      .post("/api/projects")
+      .send({
+        name: "Scope Guard Project",
+        sponsor: "QA",
+        objective: "Verify confirmed-context-only scope drafting rules.",
+      })
+      .expect(201);
+
+    const scopeGuardArtifactResponse = await agent
+      .post(`/api/projects/${scopeGuardProjectResponse.body.id}/artifacts`)
+      .send({
+        templateId: "project-charter",
+        title: "Scope Guard Charter",
+        fieldValues: {
+          project_overview: "Use one governed workflow for request intake.",
+          objectives: ["Reduce intake cycle time by 30%."],
+        },
+      })
+      .expect(201);
+
+    await agent
+      .post(
+        `/api/projects/${scopeGuardProjectResponse.body.id}/artifacts/${scopeGuardArtifactResponse.body.id}/conversations`,
+      )
+      .send({ operation: "interview" })
+      .expect(201);
+
+    const scopeGuardTurnResponse = await agent
+      .post(
+        `/api/projects/${scopeGuardProjectResponse.body.id}/artifacts/${scopeGuardArtifactResponse.body.id}/assistant/turns`,
+      )
+      .set("Idempotency-Key", "smoke-ai-scope-guard")
+      .send({
+        operation: "interview",
+        message: "Draft the Scope section using confirmed project context only.",
+        expectedRevision: scopeGuardArtifactResponse.body.revision,
+      })
+      .expect(200);
+
+    if (
+      scopeGuardTurnResponse.body.autoUpdates.length !== 0 ||
+      scopeGuardTurnResponse.body.pendingUpdates.length !== 0 ||
+      !scopeGuardTurnResponse.body.assistantMessage.includes(
+        "Confirmed scope boundaries are not available yet.",
+      )
+    ) {
+      throw new Error(
+        "Expected unconfirmed scope drafting to stay out of structured field updates.",
+      );
+    }
+
+    const scopeGuardContextResponse = await agent
+      .get(`/api/projects/${scopeGuardProjectResponse.body.id}/context`)
+      .expect(200);
+    if (scopeGuardContextResponse.body.items.some((item) => item.key === "scope")) {
+      throw new Error(
+        "Expected confirmed-context-only scope drafting not to create a reusable scope proposal.",
+      );
+    }
 
     await agent
       .put("/api/admin/system")
@@ -601,7 +768,11 @@ async function run() {
     if (globalActivity.length < activityResponse.body.activity.length) {
       throw new Error("Expected global activity to include project activity.");
     }
-    if (!globalActivity.every((item) => item.projectName === "Smoke Project")) {
+    const projectNames = new Set(globalActivity.map((item) => item.projectName));
+    if (
+      !projectNames.has("Smoke Project") ||
+      !projectNames.has("Scope Guard Project")
+    ) {
       throw new Error("Expected global activity to include project names.");
     }
     if (
