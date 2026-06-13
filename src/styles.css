@@ -2108,6 +2108,46 @@ h1 {
   margin: 0.65rem 0.15rem 0;
 }
 
+.current-project-panel {
+  background:
+    linear-gradient(180deg, rgb(233 244 243 / 92%), rgb(255 254 250 / 98%));
+  border: 1px solid #d8e7e4;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgb(20 55 60 / 6%);
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.75rem;
+}
+
+.current-project-heading {
+  align-items: center;
+  color: var(--accent-dark);
+  display: flex;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.current-project-link {
+  background: rgb(255 255 255 / 72%);
+  border: 1px solid #d8e7e4;
+}
+
+.current-project-link.active {
+  background: rgb(255 255 255 / 88%);
+  border-color: #cfe0dc;
+}
+
+.current-project-links {
+  gap: 0.6rem;
+  padding: 0;
+}
+
+.current-project-divider {
+  margin: 1rem 0 0.9rem;
+}
+
 .projects-accordion {
   background: #fffefa;
   border: 1px solid #e2e7e4;
@@ -2308,6 +2348,12 @@ h1 {
   color: var(--accent);
   font-style: normal;
   font-size: 0.7rem;
+}
+
+.artifact-nav-empty {
+  color: var(--muted);
+  font-size: 0.68rem;
+  padding: 0.1rem 0.7rem 0.2rem;
 }
 
 .sidebar-divider {

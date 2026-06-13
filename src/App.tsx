@@ -1342,6 +1342,11 @@ type ProjectsShellContext = {
   deleteProject: (project: Project) => Promise<void>;
 };
 
+type ProjectWorkspaceContext = {
+  project: Project;
+  deleteProject: (project: Project) => Promise<void>;
+};
+
 function ProjectsShell() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -1369,22 +1374,41 @@ function ProjectsShell() {
   );
   const selectedProject =
     projects.find((project) => project.id === selectedProjectId) || null;
+  const visibleWorkspaceProjects = selectedProject
+    ? filteredProjects.filter((project) => project.id !== selectedProject.id)
+    : filteredProjects;
   const shouldShowProjects = normalizedProjectSearch ? true : projectsExpanded;
+  const [createProjectPending, setCreateProjectPending] = useState(false);
+  const [createProjectMessage, setCreateProjectMessage] = useState("");
 
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const project = await api<Project>("/api/projects", {
-      method: "POST",
-      json: {
-        name: form.get("name"),
-        sponsor: form.get("sponsor"),
-        objective: form.get("objective"),
-      },
-    });
-    await queryClient.invalidateQueries({ queryKey: ["projects"] });
-    navigate(`/projects/${project.id}/context`);
-    setCreating(false);
+    setCreateProjectPending(true);
+    setCreateProjectMessage("");
+    try {
+      const form = new FormData(event.currentTarget);
+      const project = await api<Project>("/api/projects", {
+        method: "POST",
+        json: {
+          name: form.get("name"),
+          sponsor: form.get("sponsor"),
+          objective: form.get("objective"),
+        },
+      });
+      queryClient.setQueryData<Project[]>(["projects"], (current) => {
+        const existing = current || [];
+        return [project, ...existing.filter((item) => item.id !== project.id)];
+      });
+      setCreating(false);
+      navigate(`/projects/${project.id}/context`);
+      void queryClient.invalidateQueries({ queryKey: ["projects"] });
+    } catch (error) {
+      setCreateProjectMessage(
+        error instanceof Error ? error.message : "Unable to create project.",
+      );
+    } finally {
+      setCreateProjectPending(false);
+    }
   }
 
   async function deleteProject(project: Project) {
@@ -1412,15 +1436,72 @@ function ProjectsShell() {
         <button
           className="primary-button wide-button projects-sidebar-action"
           type="button"
-          onClick={() => setCreating(true)}
+          onClick={() => {
+            setCreateProjectMessage("");
+            setCreating(true);
+          }}
         >
           Create project
         </button>
         <div className="sidebar-divider" />
+        {selectedProject && (
+          <>
+            <section className="current-project-panel" aria-label="Current project">
+              <div className="current-project-heading">
+                <span>Current project</span>
+              </div>
+              <NavLink
+                className="project-list-link current-project-link active"
+                to={`/projects/${selectedProject.id}`}
+              >
+                <span>
+                  <strong>{selectedProject.name}</strong>
+                  <small>{selectedProject.sponsor || "No sponsor set"}</small>
+                </span>
+                <em>
+                  {selectedProject.artifacts.length
+                    ? Math.round(
+                        selectedProject.artifacts.reduce(
+                          (sum, artifact) => sum + artifact.completeness.percentage,
+                          0,
+                        ) / selectedProject.artifacts.length,
+                      )
+                    : 0}
+                  %
+                </em>
+              </NavLink>
+              <div className="selected-project-links current-project-links">
+                <nav className="project-nav" aria-label={`${selectedProject.name} sections`}>
+                  <NavLink end to={`/projects/${selectedProject.id}`}>Overview</NavLink>
+                  <NavLink to={`/projects/${selectedProject.id}/context`}>Project Context</NavLink>
+                </nav>
+                <div className="selected-project-subheading">
+                  <span>Artifacts</span>
+                  <em>{selectedProject.artifacts.length}</em>
+                </div>
+                <nav className="artifact-nav" aria-label={`${selectedProject.name} artifacts`}>
+                  {selectedProject.artifacts.map((artifact) => (
+                    <NavLink
+                      key={artifact.id}
+                      to={`/projects/${selectedProject.id}/artifacts/${artifact.id}`}
+                    >
+                      <span>{artifact.title}</span>
+                      <em>{artifact.completeness.percentage}%</em>
+                    </NavLink>
+                  ))}
+                  {!selectedProject.artifacts.length && (
+                    <small className="artifact-nav-empty">No artifacts started.</small>
+                  )}
+                </nav>
+              </div>
+            </section>
+            <div className="sidebar-divider current-project-divider" />
+          </>
+        )}
         <section className="projects-accordion">
           <button
             aria-expanded={shouldShowProjects}
-            aria-label={`Projects, ${filteredProjects.length} project${filteredProjects.length === 1 ? "" : "s"}`}
+            aria-label={`${selectedProject ? "Other projects" : "Projects"}, ${visibleWorkspaceProjects.length} project${visibleWorkspaceProjects.length === 1 ? "" : "s"}`}
             className="projects-nav-heading"
             type="button"
             onClick={() => {
@@ -1430,8 +1511,8 @@ function ProjectsShell() {
             }}
           >
             <span className="stage-heading-row">
-              <strong>Projects</strong>
-              <em className="stage-count">{filteredProjects.length}</em>
+              <strong>{selectedProject ? "Other projects" : "Projects"}</strong>
+              <em className="stage-count">{visibleWorkspaceProjects.length}</em>
               <span className="stage-toggle-indicator">
                 {normalizedProjectSearch ? "Matches" : shouldShowProjects ? "Hide" : "Show"}
               </span>
@@ -1439,7 +1520,7 @@ function ProjectsShell() {
           </button>
           {shouldShowProjects && (
             <nav className="projects-list-nav" aria-label="Projects list">
-              {filteredProjects.map((project) => {
+              {visibleWorkspaceProjects.map((project) => {
                 const completed = project.artifacts.length
                   ? Math.round(
                       project.artifacts.reduce(
@@ -1448,7 +1529,6 @@ function ProjectsShell() {
                       ) / project.artifacts.length,
                     )
                   : 0;
-                const isSelected = selectedProjectId === project.id;
 
                 return (
                   <div className="project-list-group" key={project.id}>
@@ -1462,38 +1542,18 @@ function ProjectsShell() {
                       </span>
                       <em>{completed}%</em>
                     </NavLink>
-                    {isSelected && (
-                      <div className="selected-project-links">
-                        <nav className="project-nav" aria-label={`${project.name} sections`}>
-                          <NavLink end to={`/projects/${project.id}`}>Overview</NavLink>
-                          <NavLink to={`/projects/${project.id}/context`}>Project Context</NavLink>
-                        </nav>
-                        <div className="selected-project-subheading">
-                          <span>Artifacts</span>
-                          <em>{project.artifacts.length}</em>
-                        </div>
-                        <nav className="artifact-nav" aria-label={`${project.name} artifacts`}>
-                          {project.artifacts.map((artifact) => (
-                            <NavLink
-                              key={artifact.id}
-                              to={`/projects/${project.id}/artifacts/${artifact.id}`}
-                            >
-                              <span>{artifact.title}</span>
-                              <em>{artifact.completeness.percentage}%</em>
-                            </NavLink>
-                          ))}
-                          {!project.artifacts.length && <small>No artifacts started.</small>}
-                        </nav>
-                      </div>
-                    )}
                   </div>
                 );
               })}
-              {!projectsQuery.isLoading && filteredProjects.length === 0 && (
+              {!projectsQuery.isLoading && visibleWorkspaceProjects.length === 0 && (
                 <p className="template-search-empty">
-                  {projects.length
-                    ? "No projects found. Try a different search term."
-                    : "No projects yet."}
+                  {selectedProject
+                    ? normalizedProjectSearch
+                      ? "No other projects match this search."
+                      : "No other projects yet."
+                    : projects.length
+                      ? "No projects found. Try a different search term."
+                      : "No projects yet."}
                 </p>
               )}
               {projectsQuery.isLoading && (
@@ -1527,7 +1587,14 @@ function ProjectsShell() {
         />
       </div>
       {creating && (
-        <div className="dialog-backdrop" onMouseDown={() => setCreating(false)}>
+        <div
+          className="dialog-backdrop"
+          onMouseDown={() => {
+            if (createProjectPending) return;
+            setCreateProjectMessage("");
+            setCreating(false);
+          }}
+        >
           <form
             className="dialog-card create-project-card"
             onSubmit={createProject}
@@ -1539,22 +1606,39 @@ function ProjectsShell() {
                 <h2>Create a project</h2>
                 <span>Start with the essentials. Context setup comes next.</span>
               </div>
-              <button type="button" className="icon-button" onClick={() => setCreating(false)}>×</button>
+              <button
+                type="button"
+                className="icon-button"
+                disabled={createProjectPending}
+                onClick={() => {
+                  setCreateProjectMessage("");
+                  setCreating(false);
+                }}
+              >
+                ×
+              </button>
             </div>
             <div className="stack-form">
               <label>
                 Project name
-                <input name="name" required autoFocus />
+                <input name="name" required autoFocus disabled={createProjectPending} />
               </label>
               <label>
                 Sponsor
-                <input name="sponsor" />
+                <input name="sponsor" disabled={createProjectPending} />
               </label>
               <label>
                 Objective
-                <textarea name="objective" rows={4} />
+                <textarea name="objective" rows={4} disabled={createProjectPending} />
               </label>
-              <button className="primary-button">Create and set up context</button>
+              {createProjectMessage && (
+                <p className="form-message error-text" role="alert">
+                  {createProjectMessage}
+                </p>
+              )}
+              <button className="primary-button" type="submit" disabled={createProjectPending}>
+                {createProjectPending ? "Creating project..." : "Create and set up context"}
+              </button>
             </div>
           </form>
         </div>
@@ -2348,6 +2432,7 @@ function ProjectCard({
 }
 
 function ProjectWorkspaceShell() {
+  const { deleteProject } = useProjectsShell();
   const { projectId = "" } = useParams();
   const projectQuery = useQuery({
     queryKey: ["project", projectId],
@@ -2359,21 +2444,18 @@ function ProjectWorkspaceShell() {
 
   const project = projectQuery.data;
   return (
-    <Outlet context={{ project }} />
+    <Outlet context={{ project, deleteProject }} />
   );
 }
 
 function useProject() {
   const { projectId = "" } = useParams();
-  const query = useQuery({
-    queryKey: ["project", projectId],
-    queryFn: () => api<Project>(`/api/projects/${projectId}`),
-  });
-  return { projectId, project: query.data, query };
+  const context = useOutletContext<ProjectWorkspaceContext>();
+  return { projectId, ...context };
 }
 
 function ProjectOverviewPage() {
-  const { projectId, project } = useProject();
+  const { projectId, project, deleteProject } = useProject();
   const activityQuery = useQuery({
     queryKey: ["activity", projectId],
     queryFn: () =>
@@ -2415,7 +2497,18 @@ function ProjectOverviewPage() {
         eyebrow="Project workspace"
         title={project.name}
         description={project.objective || "Confirm the project objective in reusable context."}
-        action={<Link className="primary-button" to="/library">+ Create artifact</Link>}
+        action={
+          <div className="button-row">
+            <button
+              className="secondary-button destructive-button"
+              type="button"
+              onClick={() => void deleteProject(project)}
+            >
+              Delete
+            </button>
+            <Link className="primary-button" to="/library">+ Create artifact</Link>
+          </div>
+        }
       />
       <section className="metric-strip">
         <Metric label="Overall progress" value={`${overall}%`} tone="teal" />
@@ -2591,6 +2684,8 @@ function ProjectContextPage() {
       },
     });
     queryClient.setQueryData(["context", projectId], response);
+    await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["projects"] });
     await queryClient.invalidateQueries({ queryKey: ["recommendation", projectId] });
     const confirmedCount = response.items.filter(
       (item) => item.trustState === "confirmed",
@@ -2605,6 +2700,8 @@ function ProjectContextPage() {
       method: "POST",
     });
     await queryClient.invalidateQueries({ queryKey: ["context", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    await queryClient.invalidateQueries({ queryKey: ["projects"] });
   }
 
   if (!project || contextQuery.isLoading) return <PanelLoading label="Loading project context..." />;

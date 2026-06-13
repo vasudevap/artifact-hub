@@ -180,17 +180,22 @@ function requestClientContext(req) {
 }
 
 async function recordRequestUsage(req, eventName, options = {}) {
-  return recordUsageEvent({
-    eventName,
-    userId: options.userId || req.user?.id || null,
-    sessionId: parseCookies(req)[SESSION_COOKIE_NAME] || null,
-    requestPath: req.path,
-    projectId: options.projectId || null,
-    artifactId: options.artifactId || null,
-    templateId: options.templateId || null,
-    context: requestClientContext(req),
-    metadata: options.metadata || {},
-  });
+  try {
+    return await recordUsageEvent({
+      eventName,
+      userId: options.userId || req.user?.id || null,
+      sessionId: parseCookies(req)[SESSION_COOKIE_NAME] || null,
+      requestPath: req.path,
+      projectId: options.projectId || null,
+      artifactId: options.artifactId || null,
+      templateId: options.templateId || null,
+      context: requestClientContext(req),
+      metadata: options.metadata || {},
+    });
+  } catch (error) {
+    console.error(`Usage logging failed for ${eventName}.`, error);
+    return null;
+  }
 }
 
 function buildLibraryEndpointRegistry() {

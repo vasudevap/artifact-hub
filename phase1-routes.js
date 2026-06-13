@@ -38,10 +38,18 @@ import {
 import { buildRuleFindings, normalizeAiFindings } from "./review-service.js";
 import { getEffectiveAiStatus, getEffectiveFeatureAvailability } from "./src/server/runtime-settings.js";
 import { updateArtifact } from "./storage.js";
-import { getProjectByIdAndOwnerId } from "./storage.js";
+import {
+  getProjectByIdAndOwnerId,
+  updateProjectFieldsByIdAndOwnerId,
+} from "./storage.js";
 import { calculateCompleteness, getTemplate } from "./template-service.js";
 
 const turnHistory = new Map();
+const canonicalContextFieldMap = {
+  "project-name": "name",
+  sponsor: "sponsor",
+  objective: "objective",
+};
 
 function createPhase1Router(requireAuth) {
   const router = express.Router();
@@ -72,16 +80,20 @@ function createPhase1Router(requireAuth) {
   }
 
   async function recordRouteUsage(req, eventName, options = {}) {
-    await recordUsageEvent({
-      eventName,
-      userId: req.user?.id || null,
-      requestPath: req.path,
-      projectId: options.projectId || null,
-      artifactId: options.artifactId || null,
-      templateId: options.templateId || null,
-      context: requestClientContext(req),
-      metadata: options.metadata || {},
-    });
+    try {
+      await recordUsageEvent({
+        eventName,
+        userId: req.user?.id || null,
+        requestPath: req.path,
+        projectId: options.projectId || null,
+        artifactId: options.artifactId || null,
+        templateId: options.templateId || null,
+        context: requestClientContext(req),
+        metadata: options.metadata || {},
+      });
+    } catch (error) {
+      console.error(`Usage logging failed for ${eventName}.`, error);
+    }
   }
 
   function isRateLimited(userId) {
@@ -93,6 +105,27 @@ function createPhase1Router(requireAuth) {
     timestamps.push(Date.now());
     turnHistory.set(userId, timestamps);
     return false;
+  }
+
+  async function syncProjectFromContextItems(projectId, ownerId, items) {
+    const updates = {};
+
+    for (const item of items) {
+      const targetField = canonicalContextFieldMap[item.key];
+      if (!targetField) continue;
+      updates[targetField] =
+        typeof item.value === "string"
+          ? item.value
+          : item.value == null
+            ? ""
+            : String(item.value);
+    }
+
+    if (!Object.keys(updates).length) {
+      return null;
+    }
+
+    return updateProjectFieldsByIdAndOwnerId(projectId, ownerId, updates);
   }
 
   router.get("/projects/:projectId/context", async (req, res) => {
@@ -109,6 +142,7 @@ function createPhase1Router(requireAuth) {
       items,
     );
     if (!saved) return res.status(404).json({ error: "Project not found." });
+    await syncProjectFromContextItems(req.params.projectId, req.user.id, saved);
     await recordActivity(
       req.params.projectId,
       req.user.id,
@@ -136,6 +170,9 @@ function createPhase1Router(requireAuth) {
           return res.status(404).json({ error: "Project not found." });
         }
         if (!item) return res.status(404).json({ error: "Context item not found." });
+        if (trustState === "confirmed") {
+          await syncProjectFromContextItems(req.params.projectId, req.user.id, [item]);
+        }
         await recordActivity(
           req.params.projectId,
           req.user.id,

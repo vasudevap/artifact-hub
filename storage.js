@@ -20,6 +20,7 @@ const PHASE1_FILE = path.join(DATA_DIR, "phase1.json");
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const USE_DATABASE = Boolean(DATABASE_URL);
+const fileWriteChains = new Map();
 
 const pool = USE_DATABASE
   ? new Pool({
@@ -45,7 +46,24 @@ async function readJsonFile(filePath, fallback) {
 }
 
 async function writeJsonFile(filePath, data) {
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+  const previousWrite = fileWriteChains.get(filePath) || Promise.resolve();
+  const nextWrite = previousWrite
+    .catch(() => {})
+    .then(async () => {
+      const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+      await fs.writeFile(tempPath, JSON.stringify(data, null, 2));
+      await fs.rename(tempPath, filePath);
+    });
+
+  fileWriteChains.set(filePath, nextWrite);
+
+  try {
+    await nextWrite;
+  } finally {
+    if (fileWriteChains.get(filePath) === nextWrite) {
+      fileWriteChains.delete(filePath);
+    }
+  }
 }
 
 function mapArtifact(row) {
@@ -300,6 +318,62 @@ async function createProject({ ownerId, name, sponsor, objective }) {
   );
 
   return project;
+}
+
+async function updateProjectFieldsByIdAndOwnerId(projectId, ownerId, updates) {
+  const project = await getProjectByIdAndOwnerId(projectId, ownerId);
+  if (!project) {
+    return null;
+  }
+
+  const timestamp = nowIso();
+  const nextName =
+    typeof updates.name === "string"
+      ? updates.name.trim() || project.name
+      : project.name;
+  const nextSponsor =
+    typeof updates.sponsor === "string"
+      ? updates.sponsor.trim()
+      : project.sponsor;
+  const nextObjective =
+    typeof updates.objective === "string"
+      ? updates.objective.trim()
+      : project.objective;
+
+  if (!USE_DATABASE) {
+    const projects = await readJsonFile(PROJECTS_FILE, []);
+    const targetProject = projects.find(
+      (item) => item.id === projectId && item.ownerId === ownerId,
+    );
+
+    if (!targetProject) {
+      return null;
+    }
+
+    targetProject.name = nextName;
+    targetProject.sponsor = nextSponsor;
+    targetProject.objective = nextObjective;
+    targetProject.updatedAt = timestamp;
+    targetProject.artifacts = (targetProject.artifacts || []).map((artifact) => ({
+      ...artifact,
+      projectName: nextName,
+    }));
+
+    await writeJsonFile(PROJECTS_FILE, projects);
+    return normalizeLocalProject(targetProject);
+  }
+
+  await pool.query(
+    `UPDATE projects
+     SET name = $3,
+         sponsor = $4,
+         objective = $5,
+         updated_at = $6
+     WHERE id = $1 AND owner_id = $2`,
+    [projectId, ownerId, nextName, nextSponsor, nextObjective, timestamp],
+  );
+
+  return getProjectByIdAndOwnerId(projectId, ownerId);
 }
 
 async function deleteProjectByIdAndOwnerId(projectId, ownerId) {
@@ -1486,6 +1560,7 @@ export {
   pool,
   readJsonFile,
   resetPasswordWithToken,
+  updateProjectFieldsByIdAndOwnerId,
   updateArtifact,
   updateOwnedArtifact,
   DATA_DIR,

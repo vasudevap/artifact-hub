@@ -1,3 +1,6 @@
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 import { describe, expect, it } from "vitest";
 import {
   ArtifactTurnSchema,
@@ -16,6 +19,7 @@ import {
   listTemplates,
   stageDefinitions,
 } from "../template-service.js";
+import { readJsonFile, writeJsonFile } from "../storage.js";
 
 const completeCharter = {
   project_overview: "Replace fragmented intake with one governed workflow.",
@@ -204,5 +208,23 @@ describe("Phase 1 domain services", () => {
     expect(Buffer.isBuffer(docx)).toBe(true);
     expect(docx.subarray(0, 2).toString()).toBe("PK");
     expect(docx.byteLength).toBeGreaterThan(1_000);
+  });
+
+  it("serializes local JSON writes so concurrent saves do not corrupt runtime files", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "artifacthub-storage-"));
+    const filePath = path.join(tempDir, "usage-events.json");
+    const first = [{ id: "one", eventName: "first" }];
+    const second = [{ id: "two", eventName: "second" }];
+    const third = [{ id: "three", eventName: "third" }];
+
+    await Promise.all([
+      writeJsonFile(filePath, first),
+      writeJsonFile(filePath, second),
+      writeJsonFile(filePath, third),
+    ]);
+
+    const stored = await readJsonFile(filePath, []);
+    expect([first, second, third]).toContainEqual(stored);
+    await fs.rm(tempDir, { recursive: true, force: true });
   });
 });
