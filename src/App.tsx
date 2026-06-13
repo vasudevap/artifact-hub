@@ -2562,6 +2562,13 @@ function ProjectContextPage() {
     );
   }, [contextQuery.data]);
 
+  function getSavedContextValue(item?: ContextItem) {
+    if (!item) return "";
+    return typeof item.value === "string"
+      ? item.value
+      : JSON.stringify(item.value ?? "");
+  }
+
   async function saveContext() {
     const existing = new Map(
       (contextQuery.data?.items || []).map((item) => [item.key, item]),
@@ -2585,7 +2592,12 @@ function ProjectContextPage() {
     });
     queryClient.setQueryData(["context", projectId], response);
     await queryClient.invalidateQueries({ queryKey: ["recommendation", projectId] });
-    setSaved("Saved just now");
+    const confirmedCount = response.items.filter(
+      (item) => item.trustState === "confirmed",
+    ).length;
+    setSaved(
+      `Context saved. ${confirmedCount} field${confirmedCount === 1 ? "" : "s"} confirmed.`,
+    );
   }
 
   async function changeTrust(item: ContextItem, action: "confirm" | "reject") {
@@ -2606,7 +2618,12 @@ function ProjectContextPage() {
           eyebrow="Reusable knowledge"
           title="Project Context"
           description="Review the shared information ArtifactHub can use across drafting, recommendations, and artifact review."
-          action={<button className="primary-button" onClick={saveContext}>Save context</button>}
+          action={
+            <div className="context-save-actions">
+              <button className="primary-button" onClick={saveContext}>Save context</button>
+              {saved ? <p className="context-save-feedback">✓ {saved}</p> : null}
+            </div>
+          }
         />
         <section className="metric-grid compact-metrics">
           <Metric label="Context completeness" value={`${contextQuery.data?.completeness.percentage || 0}%`} tone="teal" />
@@ -2628,14 +2645,23 @@ function ProjectContextPage() {
         <section className="context-form-grid">
           {contextDefinitions.map(([category, key, label]) => {
             const item = items.find((candidate) => candidate.key === key);
+            const savedValue = getSavedContextValue(item);
+            const currentValue = values[key] || "";
+            const status =
+              currentValue !== savedValue
+                ? "needs-save"
+                : item?.trustState || "proposed";
             return (
               <label className="context-field" key={key}>
-                <span>{label}<StatusBadge status={item?.trustState || "proposed"} /></span>
+                <span>{label}<StatusBadge status={status} /></span>
                 <textarea
                   rows={key === "project-name" || key === "sponsor" ? 2 : 5}
-                  value={values[key] || ""}
+                  value={currentValue}
                   onChange={(event) =>
-                    setValues((current) => ({ ...current, [key]: event.target.value }))
+                    {
+                      if (saved) setSaved("");
+                      setValues((current) => ({ ...current, [key]: event.target.value }));
+                    }
                   }
                   placeholder={`Add ${label.toLowerCase()}`}
                 />
@@ -2644,7 +2670,6 @@ function ProjectContextPage() {
             );
           })}
         </section>
-        {saved && <p className="save-status success-text">✓ {saved}</p>}
       </div>
       <GuidePanel
         title="Strengthen reusable context"

@@ -414,6 +414,22 @@ h1 {
   gap: 0.7rem;
 }
 
+.context-save-actions {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.context-save-feedback {
+  color: var(--success);
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin: 0;
+  max-width: 260px;
+  text-align: right;
+}
+
 .demo-banner,
 .recommendation-banner {
   align-items: center;
@@ -3072,6 +3088,7 @@ h1 {
 }
 
 .status-proposed,
+.status-needs-save,
 .status-needs-review,
 .status-blocking,
 .status-incomplete {
