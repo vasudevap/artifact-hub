@@ -36,9 +36,10 @@ async function run() {
   process.env.AI_FEATURE_ENABLED = "true";
   process.env.AI_BETA_EMAILS = "admin@example.com,prashant@grafley.com";
   process.env.AI_PROVIDER = "fake";
+  process.env.EMAIL_PROVIDER = "test";
 
   const { app } = await import("../server.js");
-  const { initDatabase, pool } = await import("../storage.js");
+  const { createPasswordReset, initDatabase, pool } = await import("../storage.js");
   await initDatabase();
   await initDatabase();
   const agent = request.agent(app);
@@ -96,16 +97,18 @@ async function run() {
       .send({ email })
       .expect(200);
 
-    if (!resetRequest.body.resetUrl) {
-      throw new Error("Expected password reset request to return a demo reset URL.");
+    if (resetRequest.body.resetUrl || resetRequest.body.expiresAt) {
+      throw new Error("Password reset request must not expose reset tokens or URLs.");
     }
 
-    const resetToken = new URL(resetRequest.body.resetUrl).searchParams.get(
-      "resetToken",
-    );
+    const reset = await createPasswordReset({
+      email,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    const resetToken = reset?.token;
 
     if (!resetToken) {
-      throw new Error("Expected demo reset URL to include a reset token.");
+      throw new Error("Expected test setup to create a reset token.");
     }
 
     await request(app)
@@ -115,6 +118,36 @@ async function run() {
         password: "new-password123",
       })
       .expect(200);
+
+    for (let index = 0; index < 9; index += 1) {
+      await request(app)
+        .post("/api/auth/password-reset/confirm")
+        .send({
+          token: `invalid-reset-token-${index}`,
+          password: "new-password456",
+        })
+        .expect(400);
+    }
+
+    await request(app)
+      .post("/api/auth/password-reset/confirm")
+      .send({
+        token: "invalid-reset-token-blocked",
+        password: "new-password456",
+      })
+      .expect(429);
+
+    for (let index = 0; index < 4; index += 1) {
+      await request(app)
+        .post("/api/auth/password-reset/request")
+        .send({ email: `missing-${index}@example.com` })
+        .expect(200);
+    }
+
+    await request(app)
+      .post("/api/auth/password-reset/request")
+      .send({ email: "missing-blocked@example.com" })
+      .expect(429);
 
     await request(app)
       .post("/api/auth/login")
@@ -191,8 +224,12 @@ async function run() {
     const resetLinkResponse = await agent
       .post(`/api/admin/users/${memberUser.id}/password-reset-link`)
       .expect(200);
-    if (!resetLinkResponse.body.resetUrl) {
-      throw new Error("Expected admin reset-link action to return a reset URL.");
+    if (
+      resetLinkResponse.body.emailSent !== true ||
+      resetLinkResponse.body.resetUrl ||
+      resetLinkResponse.body.expiresAt
+    ) {
+      throw new Error("Expected admin reset action to send email without returning a reset URL.");
     }
 
     await agent
@@ -441,6 +478,37 @@ async function run() {
 
     if (provenanceTurnResponse.body.autoUpdates[0]?.fieldId !== "scope") {
       throw new Error("Expected the provenance verification turn to target scope.");
+    }
+
+    const provenanceSaveResponse = await agent
+      .put(
+        `/api/projects/${projectResponse.body.id}/artifacts/${provenanceArtifactResponse.body.id}`,
+      )
+      .send({
+        title: provenanceArtifactResponse.body.title,
+        status: provenanceArtifactResponse.body.status,
+        workflowStage: provenanceArtifactResponse.body.workflowStage,
+        expectedRevision: provenanceTurnResponse.body.artifact.revision,
+        fieldValues: {
+          ...provenanceTurnResponse.body.artifact.fieldValues,
+          scope: {
+            inScope: ["Standardize vendor onboarding intake"],
+            outOfScope: ["Downstream delivery tooling"],
+          },
+        },
+      })
+      .expect(200);
+
+    if (
+      provenanceSaveResponse.body.provenance.project_overview?.sourceType !==
+        "user-authored" ||
+      provenanceSaveResponse.body.provenance.objectives?.sourceType !==
+        "user-authored" ||
+      provenanceSaveResponse.body.provenance.scope?.sourceType !== "user-edited"
+    ) {
+      throw new Error(
+        "Expected artifact saves to mark only changed fields as user-edited provenance.",
+      );
     }
 
     const preservedContextResponse = await agent

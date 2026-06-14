@@ -1,3 +1,5 @@
+import "./src/server/load-env.js";
+
 function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -19,9 +21,19 @@ function parseEmailSet(value) {
   );
 }
 
+function parseInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 const bootstrapAdminEmail = "prashant@grafley.com";
 const adminEmails = parseEmailSet(process.env.ADMIN_EMAILS);
 adminEmails.add(bootstrapAdminEmail);
+const emailProvider = String(
+  process.env.EMAIL_PROVIDER || (process.env.NODE_ENV === "production" ? "disabled" : "console"),
+)
+  .trim()
+  .toLowerCase();
 
 const config = {
   port: Number(process.env.PORT) || 3000,
@@ -41,6 +53,24 @@ const config = {
     timeoutMs: 45000,
     turnsPerHour: 30,
     retries: 1,
+  },
+  email: {
+    provider: emailProvider,
+    from: String(process.env.EMAIL_FROM || "").trim(),
+    resendApiKey: String(process.env.RESEND_API_KEY || "").trim(),
+  },
+  rateLimits: {
+    authWindowMs: parseInteger(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+    loginMaxAttempts: parseInteger(process.env.LOGIN_RATE_LIMIT_MAX, 20),
+    signupMaxAttempts: parseInteger(process.env.SIGNUP_RATE_LIMIT_MAX, 10),
+    passwordResetRequestMaxAttempts: parseInteger(
+      process.env.PASSWORD_RESET_REQUEST_RATE_LIMIT_MAX,
+      5,
+    ),
+    passwordResetConfirmMaxAttempts: parseInteger(
+      process.env.PASSWORD_RESET_CONFIRM_RATE_LIMIT_MAX,
+      10,
+    ),
   },
 };
 

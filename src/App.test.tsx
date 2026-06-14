@@ -3,6 +3,23 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>(
+    "react-router-dom",
+  );
+
+  return {
+    ...actual,
+    useBlocker: () => ({
+      state: "unblocked",
+      location: undefined,
+      proceed: () => undefined,
+      reset: () => undefined,
+    }),
+  };
+});
+
 import App from "./App";
 import type { FeatureAvailability, Project, Template, User } from "./types";
 
@@ -708,5 +725,278 @@ describe("React application shell", () => {
     expect(screen.queryByRole("link", { name: "Browse library" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "+ Create artifact" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Choose an artifact" })).not.toBeInTheDocument();
+  });
+
+  it("shows a context-needed guide message when no draft updates are applied", async () => {
+    const user = userEvent.setup();
+    const currentProject = buildProject(
+      "project-1",
+      "Launch Project",
+      "Maya Chen",
+      [],
+    );
+    const artifact = {
+      id: "artifact-1",
+      ownerId: "user-1",
+      projectId: "project-1",
+      projectName: "Launch Project",
+      templateVersionId: null,
+      templateId: "project-charter",
+      title: "Project Charter",
+      status: "draft",
+      fieldValues: {
+        project_overview: "Existing overview",
+        objectives: ["Existing objective"],
+      },
+      revision: 3,
+      templateVersion: 2,
+      workflowStage: "drafting",
+      completeness: {
+        completed: 2,
+        total: 6,
+        percentage: 33,
+        missingFieldIds: ["scope"],
+      },
+      provenance: {
+        project_overview: {
+          artifactId: "artifact-1",
+          fieldId: "project_overview",
+          sourceType: "user-authored",
+          updatedAt: "2026-06-12T22:10:00.000Z",
+        },
+        objectives: {
+          artifactId: "artifact-1",
+          fieldId: "objectives",
+          sourceType: "user-authored",
+          updatedAt: "2026-06-12T22:10:00.000Z",
+        },
+      },
+      openFindings: [],
+      createdAt: "2026-06-12T22:00:00.000Z",
+      updatedAt: "2026-06-12T22:10:00.000Z",
+    };
+    currentProject.artifacts = [artifact];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+
+        if (url.endsWith("/api/auth/me")) {
+          return jsonResponse({
+            user: demoUser,
+            features: defaultFeatures,
+          });
+        }
+        if (url.endsWith("/api/projects") && method === "GET") {
+          return jsonResponse([currentProject]);
+        }
+        if (url.endsWith("/api/projects/project-1") && method === "GET") {
+          return jsonResponse(currentProject);
+        }
+        if (url.endsWith("/api/templates/project-charter?version=2")) {
+          return jsonResponse(demoTemplates[1]);
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/conversation")) {
+          return jsonResponse({ messages: [] });
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/assistant/turns")) {
+          return jsonResponse({
+            artifact,
+            assistantMessage:
+              "Confirmed scope boundaries are not available yet. Add or confirm them in Project Context before the Guide drafts the Scope section.",
+            autoUpdates: [],
+            pendingUpdates: [],
+          });
+        }
+
+        return jsonResponse({ error: `Unhandled request: ${url}` }, 404);
+      }),
+    );
+
+    renderApp("/projects/project-1/artifacts/artifact-1");
+
+    await user.type(
+      await screen.findByPlaceholderText(
+        "Add project detail or ask for help refining a section.",
+      ),
+      "Draft the Scope section using confirmed project context only.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send to Guide" }));
+
+    expect(
+      await screen.findByText("Guide needs more context"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Confirmed scope boundaries are not available yet. Add or confirm them in Project Context before the Guide drafts the Scope section.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Guide updated the draft"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("treats unchanged auto-updates as an informational no-op instead of a success", async () => {
+    const user = userEvent.setup();
+    const currentProject = buildProject("project-1", "Launch Project", "Maya Chen", [17]);
+    const artifact = {
+      ...currentProject.artifacts[0],
+      id: "artifact-1",
+      fieldValues: {
+        project_overview: "Existing overview",
+        objectives: ["Existing objective"],
+      },
+      provenance: {
+        project_overview: {
+          artifactId: "artifact-1",
+          fieldId: "project_overview",
+          sourceType: "user-authored",
+          updatedAt: "2026-06-12T22:10:00.000Z",
+        },
+      },
+    };
+    currentProject.artifacts = [artifact];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+
+        if (url.endsWith("/api/auth/me")) {
+          return jsonResponse({ user: demoUser, features: defaultFeatures });
+        }
+        if (url.endsWith("/api/projects") && method === "GET") {
+          return jsonResponse([currentProject]);
+        }
+        if (url.endsWith("/api/projects/project-1") && method === "GET") {
+          return jsonResponse(currentProject);
+        }
+        if (url.endsWith("/api/templates/project-charter?version=2")) {
+          return jsonResponse(demoTemplates[1]);
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/conversation")) {
+          return jsonResponse({ messages: [] });
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/assistant/turns")) {
+          return jsonResponse({
+            artifact,
+            assistantMessage:
+              "Confirmed scope boundaries are not available yet. Add or confirm them in Project Context before the Guide drafts the Scope section.",
+            autoUpdates: [
+              {
+                fieldId: "scope",
+                value: { inScope: [], outOfScope: [] },
+                reason: "No confirmed scope boundaries yet.",
+              },
+            ],
+            pendingUpdates: [],
+          });
+        }
+
+        return jsonResponse({ error: `Unhandled request: ${url}` }, 404);
+      }),
+    );
+
+    renderApp("/projects/project-1/artifacts/artifact-1");
+
+    await user.type(
+      await screen.findByPlaceholderText(
+        "Add project detail or ask for help refining a section.",
+      ),
+      "Draft the Scope section using confirmed project context only.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send to Guide" }));
+
+    expect(await screen.findByText("Guide needs more context")).toBeInTheDocument();
+    expect(screen.queryByText("Guide updated the draft")).not.toBeInTheDocument();
+  });
+
+  it("preserves read-only paragraph formatting in review mode and exposes blocked approval feedback", async () => {
+    const user = userEvent.setup();
+    const currentProject = buildProject("project-1", "Review Project", "Maya Chen", [17]);
+    currentProject.artifacts = [
+      {
+        ...currentProject.artifacts[0],
+        id: "artifact-1",
+        fieldValues: {
+          project_overview:
+            "First paragraph.\n\nManual tester note: keep this as its own paragraph.",
+          objectives: [],
+        },
+        completeness: {
+          completed: 1,
+          total: 6,
+          percentage: 17,
+          missingFieldIds: ["objectives"],
+        },
+        openFindings: [
+          {
+            id: "finding-advisory",
+            artifactId: "artifact-1",
+            fieldId: "project_overview",
+            sourceType: "ai",
+            severity: "advisory",
+            findingType: "context-drift",
+            message:
+              "Remove the 'Manual tester note' text from the overview because it is not confirmed project context.",
+            status: "open",
+            createdAt: "2026-06-12T22:10:00.000Z",
+            resolvedAt: null,
+          },
+        ],
+      },
+    ];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+
+        if (url.endsWith("/api/auth/me")) {
+          return jsonResponse({ user: demoUser, features: defaultFeatures });
+        }
+        if (url.endsWith("/api/projects/project-1") && method === "GET") {
+          return jsonResponse(currentProject);
+        }
+        if (url.endsWith("/api/templates/project-charter?version=2")) {
+          return jsonResponse(demoTemplates[1]);
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/findings/finding-advisory") && method === "PATCH") {
+          return jsonResponse({
+            ...currentProject.artifacts[0].openFindings[0],
+            status: "dismissed",
+            resolvedAt: "2026-06-12T22:15:00.000Z",
+          });
+        }
+
+        return jsonResponse({ error: `Unhandled request: ${url}` }, 404);
+      }),
+    );
+
+    renderApp("/projects/project-1/artifacts/artifact-1/review");
+
+    const overview = await screen.findByText(/First paragraph\./);
+    expect(overview).toHaveStyle({ whiteSpace: "pre-wrap" });
+    expect(screen.getAllByRole("button", { name: "Approve version" }).length).toBe(2);
+    expect(screen.getAllByRole("button", { name: "Export preview" }).length).toBe(2);
+
+    await user.click(screen.getAllByRole("button", { name: "Approve version" })[0]);
+    expect(
+      await screen.findByText("Approval is blocked until 1 blocking item is resolved."),
+    ).toBeInTheDocument();
+
+    expect(screen.getAllByRole("link", { name: "Review context" }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Keep in overview" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Keep in overview" }));
+    expect(
+      await screen.findByText(
+        "Advisory dismissed. Re-run review if you want to regenerate findings from the current document.",
+      ),
+    ).toBeInTheDocument();
   });
 });

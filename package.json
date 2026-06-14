@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && vite build",
-    "check:public": "node scripts/check-public-boundary.js",
+    "check:api-reference": "node scripts/check-api-reference.js",
+    "check:public": "node scripts/check-public-boundary.js && node scripts/check-api-reference.js",
     "dev": "vite",
     "migrate:json-to-db": "node scripts/migrate-json-to-postgres.js",
     "preview": "vite preview",

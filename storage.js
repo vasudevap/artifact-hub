@@ -3,6 +3,7 @@ import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import crypto from "crypto";
 import pg from "pg";
+import "./src/server/load-env.js";
 import { runMigrations } from "./migrations.js";
 
 const { Pool } = pg;

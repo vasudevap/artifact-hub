@@ -14,6 +14,7 @@ const allowedRootFiles = new Set([
   "ai-service.js",
   "artifact-service.js",
   "config.js",
+  "email-service.js",
   "export-service.js",
   "index.html",
   "migrations.js",

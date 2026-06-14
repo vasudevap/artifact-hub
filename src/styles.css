@@ -3746,6 +3746,10 @@ h1 {
   line-height: 1.6;
 }
 
+.readonly-copy {
+  white-space: pre-wrap;
+}
+
 .readonly-object {
   display: grid;
   gap: 0.7rem;
@@ -3765,16 +3769,38 @@ h1 {
   color: var(--review);
   display: flex;
   font-size: 0.7rem;
+  gap: 0.75rem;
   justify-content: space-between;
   margin-top: 0.6rem;
   padding: 0.5rem 0.65rem;
 }
 
-.inline-finding button {
+.inline-finding > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.inline-finding strong {
+  font-size: 0.72rem;
+}
+
+.inline-finding small {
+  color: #8b6324;
+  font-size: 0.66rem;
+  line-height: 1.35;
+}
+
+.inline-finding button,
+.inline-finding a {
   background: white;
   border: 1px solid #e2bd75;
   border-radius: 4px;
+  color: var(--review);
   cursor: pointer;
+  flex: 0 0 auto;
+  font-weight: 700;
+  padding: 0.28rem 0.55rem;
+  white-space: nowrap;
 }
 
 .review-counts {
@@ -3814,7 +3840,8 @@ h1 {
   margin-bottom: 0.35rem;
 }
 
-.finding-list button {
+.finding-list button,
+.finding-list a {
   background: transparent;
   border: 0;
   color: var(--accent-dark);

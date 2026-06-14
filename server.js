@@ -1,9 +1,11 @@
 import express from "express";
+import crypto from "crypto";
 import path from "path";
 import { pathToFileURL } from "url";
 import { fileURLToPath } from "url";
 import { enrichArtifact, enrichProject } from "./artifact-service.js";
 import { config, normalizeEmail } from "./config.js";
+import { sendPasswordResetEmail } from "./email-service.js";
 import { createSessionToken, hashPassword, verifyPassword } from "./src/server/auth-utils.js";
 import {
   getAdminAnalytics,
@@ -66,6 +68,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSION_COOKIE_NAME = "artifacthub_session";
 const ADMIN_EMAILS = config.adminEmails;
+const rateLimitBuckets = new Map();
 
 function isAdminEmail(email) {
   const normalized = normalizeEmail(email);
@@ -97,6 +100,69 @@ function parseCookies(req) {
   );
 }
 
+function getClientIp(req) {
+  return (
+    String(req.get("x-forwarded-for") || req.ip || "")
+      .split(",")[0]
+      .trim() || "unknown"
+  );
+}
+
+function rateLimitKey(value) {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function consumeRateLimit(key, { maxAttempts, windowMs }) {
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key);
+
+  if (!bucket || bucket.resetAt <= now) {
+    rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return { allowed: true, remaining: Math.max(maxAttempts - 1, 0) };
+  }
+
+  if (bucket.count >= maxAttempts) {
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(Math.ceil((bucket.resetAt - now) / 1000), 1),
+    };
+  }
+
+  bucket.count += 1;
+  return { allowed: true, remaining: Math.max(maxAttempts - bucket.count, 0) };
+}
+
+function requireRateLimit(res, key, options) {
+  const result = consumeRateLimit(key, options);
+  if (result.allowed) {
+    return true;
+  }
+
+  res.setHeader("Retry-After", String(result.retryAfterSeconds));
+  res.status(429).json({
+    error: "Too many requests. Try again later.",
+    code: "RATE_LIMITED",
+  });
+  return false;
+}
+
+function requireAuthRateLimit(req, res, action, subject, maxAttempts) {
+  const windowMs = config.rateLimits.authWindowMs;
+  const ipKey = `auth:${action}:ip:${rateLimitKey(getClientIp(req))}`;
+  if (!requireRateLimit(res, ipKey, { maxAttempts, windowMs })) {
+    return false;
+  }
+
+  if (subject) {
+    const subjectKey = `auth:${action}:subject:${rateLimitKey(subject)}`;
+    if (!requireRateLimit(res, subjectKey, { maxAttempts, windowMs })) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function setSessionCookie(res, token) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   res.setHeader(
@@ -109,6 +175,32 @@ function clearSessionCookie(res) {
   res.setHeader(
     "Set-Cookie",
     `${SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
+  );
+}
+
+function stableSerialize(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableSerialize(entry)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function changedFieldIds(previousValues = {}, nextValues = {}) {
+  const fieldIds = new Set([
+    ...Object.keys(previousValues || {}),
+    ...Object.keys(nextValues || {}),
+  ]);
+
+  return Array.from(fieldIds).filter(
+    (fieldId) =>
+      stableSerialize(previousValues?.[fieldId]) !==
+      stableSerialize(nextValues?.[fieldId]),
   );
 }
 
@@ -312,14 +404,38 @@ function renderArtifactMarkdown({ artifact, project, template }) {
 }
 
 function getBaseUrl(req) {
-  if (process.env.PUBLIC_URL) {
-    return process.env.PUBLIC_URL.replace(/\/$/, "");
+  if (config.publicUrl) {
+    return config.publicUrl;
   }
 
   const protocol = String(req.get("x-forwarded-proto") || req.protocol || "http")
     .split(",")[0]
     .trim();
   return `${protocol}://${req.get("host")}`;
+}
+
+async function createAndSendPasswordReset({ req, user }) {
+  if (process.env.NODE_ENV === "production" && !config.publicUrl) {
+    return { sent: false, reason: "PUBLIC_URL_REQUIRED" };
+  }
+
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const reset = await createPasswordReset({ email: user.email, expiresAt });
+
+  if (!reset) {
+    return { sent: false, reason: "USER_NOT_FOUND" };
+  }
+
+  const resetUrl = `${getBaseUrl(req)}/?resetToken=${encodeURIComponent(
+    reset.token,
+  )}`;
+  const delivery = await sendPasswordResetEmail({
+    to: user.email,
+    resetUrl,
+    expiresAt: reset.expiresAt,
+  });
+
+  return { ...delivery, reset };
 }
 
 async function getCurrentUser(req) {
@@ -393,6 +509,18 @@ app.post("/api/auth/signup", async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
+    if (
+      !requireAuthRateLimit(
+        req,
+        res,
+        "signup",
+        email,
+        config.rateLimits.signupMaxAttempts,
+      )
+    ) {
+      return;
+    }
+
     if (!name || !email || password.length < 8) {
       return res.status(400).json({
         error:
@@ -435,6 +563,18 @@ app.post("/api/auth/login", async (req, res) => {
     const email = normalizeEmail(req.body.email);
     const password = String(req.body.password || "");
 
+    if (
+      !requireAuthRateLimit(
+        req,
+        res,
+        "login",
+        email,
+        config.rateLimits.loginMaxAttempts,
+      )
+    ) {
+      return;
+    }
+
     const user = await getUserByEmail(email);
 
     if (!user || !verifyPassword(password, user.passwordHash)) {
@@ -462,31 +602,47 @@ app.post("/api/auth/password-reset/request", async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
 
+    if (
+      !requireAuthRateLimit(
+        req,
+        res,
+        "password-reset-request",
+        email,
+        config.rateLimits.passwordResetRequestMaxAttempts,
+      )
+    ) {
+      return;
+    }
+
     if (!email) {
       return res.status(400).json({ error: "Email is required." });
     }
 
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const reset = await createPasswordReset({ email, expiresAt });
-    const response = {
-      message:
-        "If an account exists for that email, a password reset link has been created.",
-    };
+    const user = await getUserByEmail(email);
+    let delivery = { sent: false, reason: "NO_ACCOUNT" };
 
-    if (reset) {
-      const resetUrl = `${getBaseUrl(req)}/?resetToken=${encodeURIComponent(
-        reset.token,
-      )}`;
-      response.resetUrl = resetUrl;
-      response.expiresAt = reset.expiresAt;
-      if (process.env.NODE_ENV !== "test") {
-        console.log(`Password reset link for ${email}: ${resetUrl}`);
+    if (user) {
+      delivery = await createAndSendPasswordReset({ req, user });
+      if (!delivery.sent) {
+        console.warn("Password reset email was not sent.", {
+          userId: user.id,
+          reason: delivery.reason || "UNKNOWN",
+        });
       }
     }
 
+    const response = {
+      message:
+        "If an account exists for that email, password reset instructions have been sent.",
+    };
+
     await recordRequestUsage(req, "auth.password_reset_requested", {
-      userId: reset?.userId || null,
-      metadata: { email },
+      userId: user?.id || null,
+      metadata: {
+        emailDelivery: user ? (delivery.sent ? "sent" : "not_sent") : "no_account",
+        emailProvider: user && delivery.sent ? delivery.provider : null,
+        failureReason: user && !delivery.sent ? delivery.reason || "UNKNOWN" : null,
+      },
     });
 
     res.json(response);
@@ -500,6 +656,18 @@ app.post("/api/auth/password-reset/confirm", async (req, res) => {
   try {
     const token = String(req.body.token || "").trim();
     const password = String(req.body.password || "");
+
+    if (
+      !requireAuthRateLimit(
+        req,
+        res,
+        "password-reset-confirm",
+        token ? rateLimitKey(token) : "",
+        config.rateLimits.passwordResetConfirmMaxAttempts,
+      )
+    ) {
+      return;
+    }
 
     if (!token || password.length < 8) {
       return res.status(400).json({
@@ -677,30 +845,32 @@ app.post(
         return res.status(404).json({ error: "User not found." });
       }
 
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-      const reset = await createPasswordReset({ email: target.email, expiresAt });
-      if (!reset) {
-        return res.status(404).json({ error: "User not found." });
+      const delivery = await createAndSendPasswordReset({ req, user: target });
+      if (!delivery.sent) {
+        return res.status(503).json({
+          error: "Password reset email could not be sent.",
+          code: "PASSWORD_RESET_EMAIL_NOT_SENT",
+        });
       }
-      const resetUrl = `${getBaseUrl(req)}/?resetToken=${encodeURIComponent(
-        reset.token,
-      )}`;
       await recordAdminAuditEvent({
         adminUserId: req.user.id,
-        action: "admin.password_reset_link_generated",
+        action: "admin.password_reset_email_sent",
         targetUserId: target.id,
         targetType: "user",
         targetId: target.id,
-        metadata: { email: target.email },
+        metadata: { provider: delivery.provider || null },
       });
-      await recordRequestUsage(req, "admin.password_reset_link_generated", {
+      await recordRequestUsage(req, "admin.password_reset_email_sent", {
         userId: req.user.id,
-        metadata: { targetUserId: target.id },
+        metadata: {
+          targetUserId: target.id,
+          emailProvider: delivery.provider || null,
+        },
       });
-      res.json({ ok: true, resetUrl, expiresAt });
+      res.json({ ok: true, emailSent: true });
     } catch (error) {
-      console.error("Failed to generate admin reset link.", error);
-      res.status(500).json({ error: "Failed to generate reset link." });
+      console.error("Failed to send admin reset email.", error);
+      res.status(500).json({ error: "Failed to send reset email." });
     }
   },
 );
@@ -1125,6 +1295,15 @@ app.put("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
       });
     }
 
+    const existingArtifact = await getArtifactByIdAndOwnerId(
+      req.params.artifactId,
+      req.user.id,
+    );
+
+    if (!existingArtifact) {
+      return res.status(404).json({ error: "Artifact not found." });
+    }
+
     const result = await updateOwnedArtifact({
       artifactId: req.params.artifactId,
       ownerId: req.user.id,
@@ -1150,13 +1329,19 @@ app.put("/api/artifacts/:artifactId", requireAuth, async (req, res) => {
       return res.status(404).json({ error: "Artifact not found." });
     }
 
-    await setProvenance(
-      result.artifact.id,
-      Object.keys(req.body.fieldValues || {}).map((fieldId) => ({
-        fieldId,
-        sourceType: "user-edited",
-      })),
+    const updatedFieldIds = changedFieldIds(
+      existingArtifact.fieldValues || {},
+      req.body.fieldValues || {},
     );
+    if (updatedFieldIds.length) {
+      await setProvenance(
+        result.artifact.id,
+        updatedFieldIds.map((fieldId) => ({
+          fieldId,
+          sourceType: "user-edited",
+        })),
+      );
+    }
     await recordRequestUsage(req, "artifact.updated", {
       artifactId: result.artifact.id,
       projectId: result.artifact.projectId,
@@ -1345,6 +1530,20 @@ app.put(
         });
       }
 
+      const project = await getProjectByIdAndOwnerId(
+        req.params.projectId,
+        req.user.id,
+      );
+      if (!project) {
+        return res.status(404).json({ error: "Project not found." });
+      }
+      const existingArtifact = project.artifacts.find(
+        (artifact) => artifact.id === req.params.artifactId,
+      );
+      if (!existingArtifact) {
+        return res.status(404).json({ error: "Artifact not found." });
+      }
+
       const result = await updateArtifact({
         projectId: req.params.projectId,
         artifactId: req.params.artifactId,
@@ -1375,13 +1574,19 @@ app.put(
         return res.status(404).json({ error: "Artifact not found." });
       }
 
-      await setProvenance(
-        result.artifact.id,
-        Object.keys(req.body.fieldValues || {}).map((fieldId) => ({
-          fieldId,
-          sourceType: "user-edited",
-        })),
+      const updatedFieldIds = changedFieldIds(
+        existingArtifact.fieldValues || {},
+        req.body.fieldValues || {},
       );
+      if (updatedFieldIds.length) {
+        await setProvenance(
+          result.artifact.id,
+          updatedFieldIds.map((fieldId) => ({
+            fieldId,
+            sourceType: "user-edited",
+          })),
+        );
+      }
       await recordRequestUsage(req, "artifact.updated", {
         artifactId: result.artifact.id,
         projectId: req.params.projectId,

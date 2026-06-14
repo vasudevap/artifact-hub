@@ -78,10 +78,151 @@ const emptyFeatures: FeatureAvailability = {
 
 const SessionContext = createContext<Session | null>(null);
 
+type GuideTone = "error" | "success" | "info";
+
+type FindingAction =
+  | { kind: "link"; label: string; href: string }
+  | { kind: "button"; label: string; status: "resolved" | "dismissed" };
+
+type FindingPresentation = {
+  title: string;
+  detail?: string;
+  action: FindingAction;
+  secondaryAction?: FindingAction;
+  sidebarActionLabel: string;
+};
+
 function useSession() {
   const session = useContext(SessionContext);
   if (!session) throw new Error("Session context is unavailable.");
   return session;
+}
+
+function updateArtifactInProject(project: Project, artifactId: string, nextArtifact: Artifact) {
+  return {
+    ...project,
+    artifacts: project.artifacts.map((item) =>
+      item.id === artifactId ? nextArtifact : item,
+    ),
+  };
+}
+
+function syncArtifactAcrossProjectCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  projectId: string,
+  artifactId: string,
+  nextArtifact: Artifact,
+) {
+  queryClient.setQueryData<Project>(["project", projectId], (current) =>
+    current ? updateArtifactInProject(current, artifactId, nextArtifact) : current,
+  );
+  queryClient.setQueryData<Project[]>(["projects"], (current) =>
+    current
+      ? current.map((project) =>
+          project.id === projectId
+            ? updateArtifactInProject(project, artifactId, nextArtifact)
+            : project,
+        )
+      : current,
+  );
+}
+
+function valuesEqual(left: unknown, right: unknown) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function countMeaningfulAutoUpdates(
+  autoUpdates: FieldUpdate[],
+  previousFieldValues: Record<string, unknown>,
+  nextFieldValues: Record<string, unknown>,
+) {
+  return autoUpdates.filter((update) => {
+    const previousValue = previousFieldValues[update.fieldId];
+    const nextValue = nextFieldValues[update.fieldId];
+    return !valuesEqual(previousValue, nextValue);
+  }).length;
+}
+
+function buildFindingPresentation(
+  finding: Finding,
+  projectId: string,
+  artifactId: string,
+): FindingPresentation {
+  const message = finding.message.trim();
+  const lowerMessage = message.toLowerCase();
+
+  if (finding.severity === "blocking") {
+    if (lowerMessage.includes("required before approval")) {
+      return {
+        title: message,
+        action: {
+          kind: "link",
+          label: "Add content",
+          href: `/projects/${projectId}/artifacts/${artifactId}`,
+        },
+        sidebarActionLabel: "Add content",
+      };
+    }
+
+    if (
+      lowerMessage.includes("project context") ||
+      lowerMessage.includes("confirmed scope boundaries") ||
+      lowerMessage.includes("confirmed business objective") ||
+      lowerMessage.includes("confirmed delivery risks") ||
+      lowerMessage.includes("confirmed")
+    ) {
+      return {
+        title: message,
+        detail: "Open Project Context, confirm what belongs there, then run review again.",
+        action: {
+          kind: "link",
+          label: "Review context",
+          href: `/projects/${projectId}/context`,
+        },
+        sidebarActionLabel: "Review context",
+      };
+    }
+
+    return {
+      title: message,
+      detail: "Update the document, then run review again to verify the blocker is gone.",
+      action: {
+        kind: "link",
+        label: "Open editor",
+        href: `/projects/${projectId}/artifacts/${artifactId}`,
+      },
+      sidebarActionLabel: "Open editor",
+    };
+  }
+
+  if (lowerMessage.includes("not confirmed project context")) {
+    return {
+      title: "Overview includes text that may belong in reusable project context.",
+      detail: `Flagged text: ${message.replace(/^remove the /i, "").replace(/ because.*$/i, "")}`,
+      action: {
+        kind: "link",
+        label: "Review context",
+        href: `/projects/${projectId}/context`,
+      },
+      secondaryAction: {
+        kind: "button",
+        label: "Keep in overview",
+        status: "dismissed",
+      },
+      sidebarActionLabel: "Review context",
+    };
+  }
+
+  return {
+    title: message,
+    detail: "Dismiss this advisory if the content is intentional, or return to editing to revise it.",
+    action: {
+      kind: "button",
+      label: "Dismiss advisory",
+      status: "dismissed",
+    },
+    sidebarActionLabel: "Dismiss advisory",
+  };
 }
 
 function App() {
@@ -319,7 +460,6 @@ function AuthPage() {
     resetToken ? "reset" : "login",
   );
   const [message, setMessage] = useState("");
-  const [resetUrl, setResetUrl] = useState("");
   const [postAuthDestination, setPostAuthDestination] = useState(requestedDestination);
   const {
     register,
@@ -334,18 +474,15 @@ function AuthPage() {
 
   async function submit(values: AuthValues) {
     setMessage("");
-    setResetUrl("");
     try {
       if (mode === "forgot") {
         const response = await api<{
           message: string;
-          resetUrl?: string;
         }>("/api/auth/password-reset/request", {
           method: "POST",
           json: { email: values.email },
         });
         setMessage(response.message);
-        setResetUrl(response.resetUrl || "");
         return;
       }
 
@@ -382,7 +519,6 @@ function AuthPage() {
   function changeMode(next: typeof mode) {
     setMode(next);
     setMessage("");
-    setResetUrl("");
     reset();
   }
 
@@ -415,7 +551,7 @@ function AuthPage() {
           {mode === "signup"
             ? "Start with a project"
             : mode === "forgot"
-              ? "Create a reset link"
+              ? "Send reset instructions"
               : mode === "reset"
                 ? "Update your password"
                 : "Sign in to ArtifactHub"}
@@ -444,18 +580,13 @@ function AuthPage() {
             />
           )}
           {message && <p className="form-message">{message}</p>}
-          {resetUrl && (
-            <a className="inline-link" href={resetUrl}>
-              Continue to set a new password
-            </a>
-          )}
           <button className="primary-button" disabled={isSubmitting}>
             {isSubmitting
               ? "Working..."
               : mode === "signup"
                 ? "Create account"
                 : mode === "forgot"
-                  ? "Create reset link"
+                  ? "Send reset instructions"
                   : mode === "reset"
                     ? "Update password"
                     : "Sign in"}
@@ -788,15 +919,12 @@ function AdminPage() {
     ]);
   };
 
-  async function generateResetLink(target: AdminUserSummary) {
-    const response = await api<{ resetUrl: string; expiresAt: string }>(
+  async function sendResetInstructions(target: AdminUserSummary) {
+    await api<{ ok: boolean; emailSent: boolean }>(
       `/api/admin/users/${target.id}/password-reset-link`,
       { method: "POST" },
     );
-    window.prompt(
-      `Reset link for ${target.email}. It expires ${formatDateTime(response.expiresAt)}.`,
-      response.resetUrl,
-    );
+    window.alert(`Password reset instructions were sent to ${target.email}.`);
     await refreshAdminQueries();
   }
 
@@ -1004,9 +1132,9 @@ function AdminPage() {
                         <>
                           <button
                             className="secondary-button"
-                            onClick={() => generateResetLink(selectedActionUser)}
+                            onClick={() => sendResetInstructions(selectedActionUser)}
                           >
-                            Reset link
+                            Send reset
                           </button>
                           <button
                             className="secondary-button"
@@ -3364,7 +3492,8 @@ function ArtifactEditorPage() {
   const [conflict, setConflict] = useState<Artifact | null>(null);
   const [guideInput, setGuideInput] = useState("");
   const [guideMessage, setGuideMessage] = useState("");
-  const [guideMessageTone, setGuideMessageTone] = useState<"error" | "success" | "info">("info");
+  const [guideMessageTitle, setGuideMessageTitle] = useState("");
+  const [guideMessageTone, setGuideMessageTone] = useState<GuideTone>("info");
   const [guidePending, setGuidePending] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<FieldUpdate[]>([]);
   const [assignProjectId, setAssignProjectId] = useState("");
@@ -3433,16 +3562,8 @@ function ArtifactEditorPage() {
         },
       );
       if (isProjectArtifact) {
-        queryClient.setQueryData<Project>(["project", projectId], (current) =>
-          current
-            ? {
-                ...current,
-                artifacts: current.artifacts.map((item) =>
-                  item.id === updated.id ? updated : item,
-                ),
-              }
-            : current,
-        );
+        syncArtifactAcrossProjectCaches(queryClient, projectId!, artifact.id, updated);
+        await queryClient.invalidateQueries({ queryKey: ["projects"] });
       } else {
         queryClient.setQueryData(["artifact", artifactId], updated);
       }
@@ -3474,10 +3595,13 @@ function ArtifactEditorPage() {
     if (!artifact || !guideInput.trim() || !isProjectArtifact) return;
     setGuidePending(true);
     setGuideMessage("");
+    setGuideMessageTitle("");
     setGuideMessageTone("info");
     try {
       const response = await api<{
         artifact: Artifact;
+        assistantMessage: string;
+        autoUpdates: FieldUpdate[];
         pendingUpdates: FieldUpdate[];
       }>(`/api/projects/${projectId}/artifacts/${artifact.id}/assistant/turns`, {
         method: "POST",
@@ -3488,34 +3612,46 @@ function ArtifactEditorPage() {
           expectedRevision: artifact.revision,
         },
       });
+      const meaningfulAutoUpdateCount = countMeaningfulAutoUpdates(
+        response.autoUpdates,
+        artifact.fieldValues,
+        response.artifact.fieldValues,
+      );
       setGuideInput("");
       setPendingUpdates(response.pendingUpdates);
       setValues(response.artifact.fieldValues);
       setDirty(false);
-      queryClient.setQueryData<Project>(["project", projectId], (current) =>
-        current
-          ? {
-              ...current,
-              artifacts: current.artifacts.map((item) =>
-                item.id === artifact.id ? response.artifact : item,
-              ),
-            }
-          : current,
+      syncArtifactAcrossProjectCaches(
+        queryClient,
+        projectId!,
+        artifact.id,
+        response.artifact,
       );
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
       await queryClient.invalidateQueries({
         queryKey: ["conversation", projectId, artifactId],
       });
       if (response.pendingUpdates.length) {
         setGuideMessageTone("success");
+        setGuideMessageTitle("Guide prepared updates for review");
         setGuideMessage(
           `${response.pendingUpdates.length} suggested update${
             response.pendingUpdates.length === 1 ? "" : "s"
           } ready for review.`,
         );
-      } else {
+      } else if (meaningfulAutoUpdateCount > 0) {
         setGuideMessageTone("success");
+        setGuideMessageTitle("Guide updated the draft");
         setGuideMessage(
-          "Guide response received. Review the draft updates in the document and continue with the next section.",
+          response.assistantMessage ||
+            "Guide response received. Review the draft updates in the document and continue with the next section.",
+        );
+      } else {
+        setGuideMessageTone("info");
+        setGuideMessageTitle("Guide needs more context");
+        setGuideMessage(
+          response.assistantMessage ||
+            "Not enough confirmed project context is available to update this section yet.",
         );
       }
     } catch (error) {
@@ -3526,11 +3662,13 @@ function ArtifactEditorPage() {
       ) {
         setConflict(error.data.latestArtifact as Artifact);
         setGuideMessageTone("error");
+        setGuideMessageTitle("Guide needs attention");
         setGuideMessage(
           "The artifact changed in another session. Refresh or resolve the conflict before retrying the Guide.",
         );
       } else {
         setGuideMessageTone("error");
+        setGuideMessageTitle("Guide needs attention");
         setGuideMessage(
           error instanceof Error
             ? error.message
@@ -3556,11 +3694,8 @@ function ArtifactEditorPage() {
     );
     setPendingUpdates([]);
     setValues(updated.fieldValues);
-    queryClient.setQueryData<Project>(["project", projectId], (current) =>
-      current
-        ? { ...current, artifacts: current.artifacts.map((item) => item.id === updated.id ? updated : item) }
-        : current,
-    );
+    syncArtifactAcrossProjectCaches(queryClient, projectId!, updated.id, updated);
+    await queryClient.invalidateQueries({ queryKey: ["projects"] });
   }
 
   async function assignToProject(targetProjectId: string) {
@@ -3753,6 +3888,7 @@ function ArtifactEditorPage() {
                       setGuideInput(event.target.value);
                       if (guideMessage) {
                         setGuideMessage("");
+                        setGuideMessageTitle("");
                         setGuideMessageTone("info");
                       }
                     }}
@@ -3785,11 +3921,12 @@ function ArtifactEditorPage() {
                         }`}
                       >
                         <strong>
-                          {guideMessageTone === "success"
-                            ? "Guide updated the draft"
-                            : guideMessageTone === "error"
-                              ? "Guide needs attention"
-                              : "Guide status"}
+                          {guideMessageTitle ||
+                            (guideMessageTone === "success"
+                              ? "Guide updated the draft"
+                              : guideMessageTone === "error"
+                                ? "Guide needs attention"
+                                : "Guide status")}
                         </strong>
                         <p>{guideMessage}</p>
                       </div>
@@ -4061,37 +4198,81 @@ function ArtifactReviewPage() {
   });
   const [findings, setFindings] = useState<Finding[]>(artifact?.openFindings || []);
   const [message, setMessage] = useState("");
+  const [messageTone, setMessageTone] = useState<GuideTone>("info");
+  const [approvePending, setApprovePending] = useState(false);
+  const [findingMessage, setFindingMessage] = useState("");
 
   useEffect(() => {
     if (artifact) setFindings(artifact.openFindings);
   }, [artifact]);
 
   async function runReview() {
+    setFindingMessage("");
+    setMessage("");
     const response = await api<{ findings: Finding[] }>(
       `/api/projects/${projectId}/artifacts/${artifactId}/review`,
       { method: "POST" },
     );
     setFindings(response.findings);
     await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    setMessageTone("info");
+    setMessage(
+      response.findings.length
+        ? `Review refreshed. ${response.findings.length} open finding${
+            response.findings.length === 1 ? "" : "s"
+          } still need attention.`
+        : "Review refreshed. No open findings remain.",
+    );
   }
 
   async function setFindingStatus(finding: Finding, status: "resolved" | "dismissed") {
+    setFindingMessage("");
     await api(
       `/api/projects/${projectId}/artifacts/${artifactId}/findings/${finding.id}`,
       { method: "PATCH", json: { status } },
     );
-    setFindings((current) => current.map((item) => item.id === finding.id ? { ...item, status } : item));
+    setFindings((current) =>
+      current.map((item) => (item.id === finding.id ? { ...item, status } : item)),
+    );
+    setFindingMessage(
+      status === "dismissed"
+        ? "Advisory dismissed. Re-run review if you want to regenerate findings from the current document."
+        : "Finding marked fixed. Re-run review after editing if you want ArtifactHub to verify the latest content.",
+    );
   }
 
   async function approve() {
+    setMessage("");
+    setFindingMessage("");
+    if (blockerCount > 0) {
+      setMessageTone("info");
+      setMessage(
+        blockerCount === 1
+          ? "Approval is blocked until 1 blocking item is resolved."
+          : `Approval is blocked until ${blockerCount} blocking items are resolved.`,
+      );
+      return;
+    }
+
+    setApprovePending(true);
     try {
-      await api(`/api/projects/${projectId}/artifacts/${artifactId}/approve`, {
+      const response = await api<{ version: Version }>(
+        `/api/projects/${projectId}/artifacts/${artifactId}/approve`,
+        {
         method: "POST",
-      });
+        },
+      );
       await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      navigate(`/projects/${projectId}/artifacts/${artifactId}/export`);
+      await queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setMessageTone("success");
+      setMessage(
+        `Version ${response.version.versionNumber} approved. Export the approved snapshot when you're ready.`,
+      );
     } catch (error) {
+      setMessageTone("error");
       setMessage(error instanceof Error ? error.message : "Approval is blocked.");
+    } finally {
+      setApprovePending(false);
     }
   }
 
@@ -4118,7 +4299,12 @@ function ArtifactReviewPage() {
         <div className="editor-actions">
           <ProgressRing value={artifact.completeness.percentage} />
           <Link className="secondary-button" to={`/projects/${projectId}/artifacts/${artifactId}`}>Return to editing</Link>
-          <button className="primary-button" disabled={blockerCount > 0} onClick={approve}>Approve and export</button>
+          <button className="secondary-button" onClick={() => navigate(`/projects/${projectId}/artifacts/${artifactId}/export`)}>
+            Export preview
+          </button>
+          <button className="primary-button" disabled={approvePending} onClick={approve}>
+            {approvePending ? "Approving..." : "Approve version"}
+          </button>
         </div>
       </header>
       <div className="editor-layout">
@@ -4142,10 +4328,13 @@ function ArtifactReviewPage() {
                     </div>
                   )}
                   {fieldFindings.map((finding) => (
-                    <div className="inline-finding" key={finding.id}>
-                      <span>{finding.message}</span>
-                      <button onClick={() => setFindingStatus(finding, "resolved")}>Mark resolved</button>
-                    </div>
+                    <FindingNotice
+                      key={finding.id}
+                      finding={finding}
+                      artifactId={artifactId}
+                      projectId={projectId}
+                      onStatusChange={setFindingStatus}
+                    />
                   ))}
                 </div>
               </article>
@@ -4165,8 +4354,16 @@ function ArtifactReviewPage() {
             {open.map((finding, index) => (
               <article key={finding.id}>
                 <span>{index + 1}</span>
-                <div><strong>{finding.message}</strong><StatusBadge status={finding.severity} /></div>
-                <button onClick={() => setFindingStatus(finding, finding.severity === "blocking" ? "resolved" : "dismissed")}>Resolve</button>
+                <div>
+                  <strong>{buildFindingPresentation(finding, projectId, artifactId).title}</strong>
+                  <StatusBadge status={finding.severity} />
+                </div>
+                <FindingListAction
+                  finding={finding}
+                  artifactId={artifactId}
+                  projectId={projectId}
+                  onStatusChange={setFindingStatus}
+                />
               </article>
             ))}
             {missingWithoutFinding.map((field, index) => (
@@ -4182,16 +4379,112 @@ function ArtifactReviewPage() {
             {!attentionCount && <p>No open findings. The artifact is ready for approval.</p>}
           </div>
           <button className="secondary-button wide-button" onClick={runReview}>Run review</button>
-          <button className="primary-button wide-button" disabled={blockerCount > 0} onClick={approve}>Approve and export</button>
-          {blockerCount > 0 && (
+          <button
+            className="secondary-button wide-button"
+            onClick={() => navigate(`/projects/${projectId}/artifacts/${artifactId}/export`)}
+          >
+            Export preview
+          </button>
+          <button className="primary-button wide-button" disabled={approvePending} onClick={approve}>
+            {approvePending ? "Approving..." : "Approve version"}
+          </button>
+          {blockerCount > 0 && !message && (
             <p className="form-message">
-              Complete required content and resolve blocking findings before approval.
+              Approval is blocked until required content and blocking findings are resolved.
             </p>
           )}
-          {message && <p className="form-message error-text">{message}</p>}
+          {findingMessage && <p className="form-message">{findingMessage}</p>}
+          {message && (
+            <p className={`form-message ${messageTone === "error" ? "error-text" : ""}`}>
+              {message}
+            </p>
+          )}
         </aside>
       </div>
     </main>
+  );
+}
+
+function FindingActionButton({
+  action,
+  onStatusChange,
+}: {
+  action: FindingAction;
+  onStatusChange: () => void;
+}) {
+  if (action.kind === "link") {
+    return <Link to={action.href}>{action.label}</Link>;
+  }
+
+  return <button onClick={onStatusChange}>{action.label}</button>;
+}
+
+function FindingNotice({
+  artifactId,
+  finding,
+  onStatusChange,
+  projectId,
+}: {
+  artifactId: string;
+  finding: Finding;
+  onStatusChange: (finding: Finding, status: "resolved" | "dismissed") => Promise<void>;
+  projectId: string;
+}) {
+  const presentation = buildFindingPresentation(finding, projectId, artifactId);
+  return (
+    <div className="inline-finding">
+      <div>
+        <strong>{presentation.title}</strong>
+        {presentation.detail ? <small>{presentation.detail}</small> : null}
+      </div>
+      <FindingActionButton
+        action={presentation.action}
+        onStatusChange={() => onStatusChange(finding, presentation.action.kind === "button" ? presentation.action.status : "resolved")}
+      />
+      {presentation.secondaryAction ? (
+        <FindingActionButton
+          action={presentation.secondaryAction}
+          onStatusChange={() =>
+            onStatusChange(
+              finding,
+              presentation.secondaryAction?.kind === "button"
+                ? presentation.secondaryAction.status
+                : "resolved",
+            )
+          }
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function FindingListAction({
+  artifactId,
+  finding,
+  onStatusChange,
+  projectId,
+}: {
+  artifactId: string;
+  finding: Finding;
+  onStatusChange: (finding: Finding, status: "resolved" | "dismissed") => Promise<void>;
+  projectId: string;
+}) {
+  const presentation = buildFindingPresentation(finding, projectId, artifactId);
+  return (
+    <FindingActionButton
+      action={{
+        ...presentation.action,
+        label: presentation.sidebarActionLabel,
+      }}
+      onStatusChange={() =>
+        onStatusChange(
+          finding,
+          presentation.action.kind === "button"
+            ? presentation.action.status
+            : "resolved",
+        )
+      }
+    />
   );
 }
 
@@ -4218,7 +4511,11 @@ function ReadOnlyValue({ value }: { value: unknown }) {
       </div>
     );
   }
-  return <p className="readonly-copy">{String(value || "Not provided.")}</p>;
+  return (
+    <p className="readonly-copy" style={{ whiteSpace: "pre-wrap" }}>
+      {String(value || "Not provided.")}
+    </p>
+  );
 }
 
 function ExportPreviewPage() {

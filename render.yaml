@@ -13,6 +13,14 @@ services:
         value: "true"
       - key: AI_PROVIDER
         value: openai
+      - key: PUBLIC_URL
+        value: https://artifact-hub-y528.onrender.com
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: artifact-hub-db
