@@ -295,6 +295,9 @@ function App() {
             <Route path="/about" element={<AboutShell />}>
               <Route index element={<AboutPage />} />
             </Route>
+            <Route path="/api-reference" element={<ApiReferencePage />} />
+            <Route path="/help" element={<HelpDocsPage />} />
+            <Route path="/feedback" element={<FeedbackPage />} />
             <Route path="/activity" element={<GlobalActivityPage />} />
             <Route path="/library" element={<LibraryShell />}>
               <Route index element={<ArtifactLibraryPage />} />
@@ -619,6 +622,9 @@ function AppShell() {
     location.pathname === "/library" ||
     location.pathname.startsWith("/library/");
   const activityActive = location.pathname === "/activity";
+  const apiReferenceActive = location.pathname === "/api-reference";
+  const helpActive = location.pathname === "/help";
+  const feedbackActive = location.pathname === "/feedback";
   const projectsActive =
     location.pathname === "/projects" ||
     location.pathname.startsWith("/projects/");
@@ -659,6 +665,24 @@ function AppShell() {
               icon="◷"
               label="Activity"
               active={activityActive}
+            />
+            <RailLink
+              to="/api-reference"
+              icon="{ }"
+              label="API Reference"
+              active={apiReferenceActive}
+            />
+            <RailLink
+              to="/help"
+              icon="?"
+              label="Help Docs"
+              active={helpActive}
+            />
+            <RailLink
+              to="/feedback"
+              icon="✉"
+              label="Feedback"
+              active={feedbackActive}
             />
           </div>
           <button
@@ -2407,6 +2431,275 @@ function AboutPage() {
         Built by a practitioner. Improved through feedback. Designed for better
         project delivery.
       </p>
+    </main>
+  );
+}
+
+const apiReferenceGroups = [
+  {
+    title: "Health",
+    routes: [
+      ["GET", "/api/health", "No", "Safe runtime and storage health metadata."],
+    ],
+  },
+  {
+    title: "Authentication",
+    routes: [
+      ["POST", "/api/auth/signup", "No", "Create an account and start a session."],
+      ["POST", "/api/auth/login", "No", "Start a session for an existing account."],
+      ["GET", "/api/auth/me", "Optional session", "Read the current session."],
+      ["POST", "/api/auth/logout", "Optional session", "Clear the current session."],
+      ["POST", "/api/auth/password-reset/request", "No", "Send reset instructions with account-enumeration protection."],
+      ["POST", "/api/auth/password-reset/confirm", "No", "Set a new password from a valid reset token."],
+      ["POST", "/api/auth/password-change", "Yes", "Change the signed-in user's password."],
+    ],
+  },
+  {
+    title: "Workspace",
+    routes: [
+      ["GET", "/api/projects", "Yes", "List owned projects."],
+      ["POST", "/api/projects", "Yes", "Create a project workspace."],
+      ["GET", "/api/projects/:projectId", "Yes", "Read an owned project workspace."],
+      ["DELETE", "/api/projects/:projectId", "Yes", "Delete an owned project."],
+      ["GET", "/api/activity?limit=50", "Yes", "Read the signed-in user's activity feed."],
+      ["POST", "/api/feedback", "Yes", "Send product feedback to the ArtifactHub team."],
+    ],
+  },
+  {
+    title: "Templates And Artifacts",
+    routes: [
+      ["GET", "/api/templates", "No", "List standardized templates."],
+      ["GET", "/api/templates/:id?version=:version", "No", "Read a template."],
+      ["POST", "/api/artifacts", "Yes", "Create a private unassigned draft."],
+      ["GET", "/api/artifacts?scope=unassigned", "Yes", "List unassigned drafts."],
+      ["GET", "/api/artifacts/:artifactId", "Yes", "Read an owned artifact."],
+      ["PUT", "/api/artifacts/:artifactId", "Yes", "Save an owned artifact draft."],
+      ["DELETE", "/api/artifacts/:artifactId", "Yes", "Delete an owned artifact."],
+      ["POST", "/api/artifacts/:artifactId/assign", "Yes", "Assign a draft to an owned project."],
+    ],
+  },
+  {
+    title: "Review And Export",
+    routes: [
+      ["POST", "/api/projects/:projectId/artifacts/:artifactId/review", "Yes", "Run artifact review."],
+      ["PATCH", "/api/projects/:projectId/artifacts/:artifactId/findings/:findingId", "Yes", "Update a review finding."],
+      ["POST", "/api/projects/:projectId/artifacts/:artifactId/approve", "Yes", "Create an approved version."],
+      ["POST", "/api/projects/:projectId/artifacts/:artifactId/reopen", "Yes", "Return an artifact to draft."],
+      ["GET", "/api/projects/:projectId/artifacts/:artifactId/export-preview?version=:number", "Yes", "Preview export content."],
+      ["GET", "/api/projects/:projectId/artifacts/:artifactId/export.docx?version=:number", "Yes", "Download DOCX export."],
+    ],
+  },
+  {
+    title: "Administration",
+    routes: [
+      ["ALL", "/api/admin/*", "Admin", "Operational demo administration APIs are summarized, not publicly detailed."],
+    ],
+  },
+];
+
+function ApiReferencePage() {
+  return (
+    <main className="page-frame docs-page">
+      <PageHeading
+        eyebrow="Reference"
+        title="API Reference"
+        description="A security-aware summary of ArtifactHub routes, authentication boundaries, and intended use."
+      />
+      <section className="demo-banner">
+        <div>
+          <strong>Living reference</strong>
+          <span>The public README remains the canonical detailed reference and is checked for route drift during validation.</span>
+        </div>
+        <a href="/api/health" target="_blank" rel="noreferrer">Open health endpoint</a>
+      </section>
+      <div className="docs-stack">
+        {apiReferenceGroups.map((group) => (
+          <section className="surface-panel docs-section" key={group.title}>
+            <div className="panel-heading">
+              <h2>{group.title}</h2>
+            </div>
+            <div className="api-reference-table-wrap">
+              <table className="api-reference-table">
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Auth</th>
+                    <th>Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.routes.map(([method, path, auth, description]) => (
+                    <tr key={`${method}-${path}`}>
+                      <td><span className="api-method">{method}</span></td>
+                      <td><code>{path}</code></td>
+                      <td><span className="status-badge">{auth}</span></td>
+                      <td>{description}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ))}
+      </div>
+    </main>
+  );
+}
+
+const helpSections = [
+  {
+    title: "Start A Project",
+    body: "Create a project from Projects, add a clear objective and sponsor, then open Project Context before drafting documents.",
+  },
+  {
+    title: "Use Project Context",
+    body: "Capture reusable facts such as scope, stakeholders, assumptions, risks, and decisions. Confirmed context can support stronger artifacts.",
+  },
+  {
+    title: "Create An Artifact",
+    body: "Open Artifact Library, choose a standardized template, draft the sections, and assign unassigned drafts to a project when context is ready.",
+  },
+  {
+    title: "Review And Export",
+    body: "Use review mode to find blockers, resolve or dismiss findings, approve the artifact, then export draft or approved versions.",
+  },
+];
+
+const faqItems = [
+  {
+    question: "Is ArtifactHub production-ready?",
+    answer: "No. This is an active demo. Do not enter confidential, sensitive, regulated, or personally identifiable information.",
+  },
+  {
+    question: "Why does password reset show the same message for every email?",
+    answer: "That protects accounts from enumeration. Reset instructions are only sent when an account exists, but the UI does not reveal that fact.",
+  },
+  {
+    question: "Can I start from the Artifact Library without a project?",
+    answer: "Yes. Library-started artifacts are private unassigned drafts until you assign them to a project.",
+  },
+  {
+    question: "Where should I report bugs or product ideas?",
+    answer: "Use the Feedback page from the global rail. It sends your note to the ArtifactHub team with your signed-in account attached.",
+  },
+];
+
+function HelpDocsPage() {
+  return (
+    <main className="page-frame docs-page">
+      <PageHeading
+        eyebrow="Help"
+        title="Help Docs"
+        description="Practical guidance for moving through ArtifactHub's project workspace, artifact library, review flow, and demo boundaries."
+      />
+      <section className="docs-grid">
+        {helpSections.map((section, index) => (
+          <article className="surface-panel docs-card" key={section.title}>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <h2>{section.title}</h2>
+            <p>{section.body}</p>
+          </article>
+        ))}
+      </section>
+      <section className="surface-panel docs-section">
+        <div className="panel-heading">
+          <h2>FAQ</h2>
+        </div>
+        <div className="faq-list">
+          {faqItems.map((item) => (
+            <details key={item.question}>
+              <summary>{item.question}</summary>
+              <p>{item.answer}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function FeedbackPage() {
+  const { user } = useSession();
+  const [sent, setSent] = useState(false);
+  const feedbackMutation = useMutation({
+    mutationFn: (payload: { category: string; subject: string; message: string }) =>
+      api<{ ok: boolean }>("/api/feedback", {
+        method: "POST",
+        json: payload,
+      }),
+  });
+
+  async function submitFeedback(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    setSent(false);
+    await feedbackMutation.mutateAsync({
+      category: String(formData.get("category") || "General feedback"),
+      subject: String(formData.get("subject") || ""),
+      message: String(formData.get("message") || ""),
+    });
+    form.reset();
+    setSent(true);
+  }
+
+  return (
+    <main className="page-frame docs-page feedback-page">
+      <PageHeading
+        eyebrow="Feedback"
+        title="Share Feedback"
+        description="Send bugs, questions, workflow friction, or product ideas directly to the ArtifactHub team."
+      />
+      <section className="feedback-layout">
+        <form className="surface-panel feedback-form" onSubmit={submitFeedback}>
+          <label>
+            Category
+            <select name="category" defaultValue="Product feedback">
+              <option>Product feedback</option>
+              <option>Bug report</option>
+              <option>Help request</option>
+              <option>Template request</option>
+              <option>Security concern</option>
+            </select>
+          </label>
+          <label>
+            Subject
+            <input name="subject" maxLength={140} required />
+          </label>
+          <label>
+            Message
+            <textarea name="message" rows={9} maxLength={4000} required />
+          </label>
+          <div className="feedback-form-footer">
+            <small>Sending as {user?.email}. Replies go to your account email.</small>
+            <button className="primary-button" disabled={feedbackMutation.isPending}>
+              {feedbackMutation.isPending ? "Sending..." : "Send feedback"}
+            </button>
+          </div>
+          {sent && <p className="success-text">Thanks. Your feedback was sent.</p>}
+          {feedbackMutation.isError && (
+            <p className="error-text">
+              {feedbackMutation.error instanceof Error
+                ? feedbackMutation.error.message
+                : "Feedback could not be sent right now."}
+            </p>
+          )}
+        </form>
+        <aside className="surface-panel feedback-aside">
+          <h2>What helps most</h2>
+          <ul>
+            <li>What you were trying to do</li>
+            <li>What happened instead</li>
+            <li>The project or artifact area involved</li>
+            <li>Whether this blocked your workflow</li>
+          </ul>
+          <p>
+            Feedback is emailed to <strong>contact@grafley.com</strong> through the
+            configured Resend sender.
+          </p>
+        </aside>
+      </section>
     </main>
   );
 }

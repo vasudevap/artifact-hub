@@ -181,6 +181,47 @@ describe("React application shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows reference, help, and feedback rail destinations", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/auth/me")) {
+        return jsonResponse({ user: demoUser, features: defaultFeatures });
+      }
+
+      if (url.endsWith("/api/feedback")) {
+        return jsonResponse({ ok: true });
+      }
+
+      return jsonResponse({ error: "Not found." }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/api-reference");
+
+    expect(await screen.findByRole("heading", { name: "API Reference" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /API Reference/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Help Docs/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Feedback/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("link", { name: /Help Docs/i }));
+    expect(await screen.findByRole("heading", { name: "Help Docs" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("link", { name: /Feedback/i }));
+    expect(await screen.findByRole("heading", { name: "Share Feedback" })).toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Category"), "Bug report");
+    await userEvent.type(screen.getByLabelText("Subject"), "Navigation feedback");
+    await userEvent.type(screen.getByLabelText("Message"), "The new feedback form is reachable.");
+    await userEvent.click(screen.getByRole("button", { name: "Send feedback" }));
+
+    expect(await screen.findByText("Thanks. Your feedback was sent.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feedback",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("separates the current project block from other workspace projects in the sidebar", async () => {
     const selectedProject = buildProject(
       "project-1",

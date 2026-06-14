@@ -141,8 +141,9 @@ The supported environment variables are:
 | `OPENAI_API_KEY` | Configures the OpenAI provider |
 | `OPENAI_MODEL` | Overrides the default `gpt-5.5` model |
 | `OPENAI_REASONING_EFFORT` | Overrides the default `medium` reasoning effort |
-| `EMAIL_PROVIDER` | Selects `disabled`, `console`, or `resend` password-reset email delivery |
-| `EMAIL_FROM` | Sets the verified sender address for password-reset email delivery |
+| `EMAIL_PROVIDER` | Selects `disabled`, `console`, or `resend` for application email delivery |
+| `EMAIL_FROM` | Sets the verified sender address for password-reset and feedback email delivery |
+| `FEEDBACK_EMAIL_TO` | Overrides the feedback recipient; defaults to `contact@grafley.com` |
 | `RESEND_API_KEY` | Configures Resend email delivery when `EMAIL_PROVIDER=resend` |
 | `AUTH_RATE_LIMIT_WINDOW_MS` | Sets the auth rate-limit window; defaults to 15 minutes |
 | `LOGIN_RATE_LIMIT_MAX` | Sets login attempts per auth rate-limit window |
@@ -254,6 +255,7 @@ Template responses include lifecycle stage metadata (`stageKey`, `stageName`,
 | `POST /api/projects/:projectId/context/:itemId/reject` | Yes | None | Rejected `ContextItem` |
 | `GET /api/projects/:projectId/activity` | Yes | None | `{ "activity": Activity[] }` |
 | `GET /api/activity?limit=50` | Yes | `limit` is clamped between `1` and `100` | `{ "activity": Activity[] }` |
+| `POST /api/feedback` | Yes | `{ "category": "...", "subject": "...", "message": "..." }` | Sends signed-in user feedback to the configured feedback inbox and returns `{ "ok": true }` |
 | `GET /api/projects/:projectId/recommendation` | Yes | None | `{ "recommendation": Recommendation }` |
 
 Confirmed project context can synchronize canonical project fields such as

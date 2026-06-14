@@ -92,6 +92,24 @@ async function run() {
       })
       .expect(201);
 
+    await request(app)
+      .post("/api/feedback")
+      .send({
+        category: "Bug report",
+        subject: "Unauthenticated feedback",
+        message: "This should not be accepted.",
+      })
+      .expect(401);
+
+    await memberAgent
+      .post("/api/feedback")
+      .send({
+        category: "Bug report",
+        subject: "Smoke feedback",
+        message: "Feedback delivery should succeed through the test provider.",
+      })
+      .expect(200);
+
     const resetRequest = await request(app)
       .post("/api/auth/password-reset/request")
       .send({ email })

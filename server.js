@@ -5,7 +5,7 @@ import { pathToFileURL } from "url";
 import { fileURLToPath } from "url";
 import { enrichArtifact, enrichProject } from "./artifact-service.js";
 import { config, normalizeEmail } from "./config.js";
-import { sendPasswordResetEmail } from "./email-service.js";
+import { sendFeedbackEmail, sendPasswordResetEmail } from "./email-service.js";
 import { createSessionToken, hashPassword, verifyPassword } from "./src/server/auth-utils.js";
 import {
   getAdminAnalytics,
@@ -782,6 +782,64 @@ app.get("/api/auth/me", async (req, res) => {
   } catch (error) {
     console.error("Failed to fetch current user.", error);
     res.status(500).json({ error: "Failed to fetch current user." });
+  }
+});
+
+app.post("/api/feedback", requireAuth, async (req, res) => {
+  try {
+    const category = String(req.body.category || "General feedback").trim().slice(0, 80);
+    const subject = String(req.body.subject || "").trim().slice(0, 140);
+    const message = String(req.body.message || "").trim().slice(0, 4000);
+
+    if (!subject || !message) {
+      return res.status(400).json({
+        error: "A subject and message are required.",
+      });
+    }
+
+    if (
+      !requireAuthRateLimit(
+        req,
+        res,
+        "feedback",
+        req.user.id,
+        5,
+      )
+    ) {
+      return;
+    }
+
+    const delivery = await sendFeedbackEmail({
+      user: req.user,
+      category,
+      subject,
+      message,
+    });
+
+    if (!delivery.sent) {
+      console.warn("Feedback email was not sent.", {
+        userId: req.user.id,
+        reason: delivery.reason || "UNKNOWN",
+      });
+      return res.status(503).json({
+        error: "Feedback could not be sent right now.",
+        code: "FEEDBACK_EMAIL_NOT_SENT",
+      });
+    }
+
+    await recordRequestUsage(req, "feedback.submitted", {
+      userId: req.user.id,
+      metadata: {
+        category,
+        emailProvider: delivery.provider || null,
+        emailProviderMessageId: delivery.providerMessageId || null,
+      },
+    });
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to submit feedback.", error);
+    res.status(500).json({ error: "Failed to submit feedback." });
   }
 });
 

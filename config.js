@@ -58,6 +58,7 @@ const config = {
     provider: emailProvider,
     from: String(process.env.EMAIL_FROM || "").trim(),
     resendApiKey: String(process.env.RESEND_API_KEY || "").trim(),
+    feedbackTo: String(process.env.FEEDBACK_EMAIL_TO || "contact@grafley.com").trim(),
   },
   rateLimits: {
     authWindowMs: parseInteger(process.env.AUTH_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),

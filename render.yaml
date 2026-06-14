@@ -19,6 +19,8 @@ services:
         value: resend
       - key: EMAIL_FROM
         sync: false
+      - key: FEEDBACK_EMAIL_TO
+        value: contact@grafley.com
       - key: RESEND_API_KEY
         sync: false
       - key: DATABASE_URL

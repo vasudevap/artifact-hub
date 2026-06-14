@@ -19,7 +19,38 @@ function resetEmailText({ resetUrl, expiresAt }) {
   ].join("\n");
 }
 
-async function sendResendEmail({ to, subject, html, text }) {
+function feedbackEmailHtml({ user, category, subject, message }) {
+  return `
+    <p><strong>ArtifactHub feedback received.</strong></p>
+    <p><strong>From:</strong> ${escapeHtml(user.name)} &lt;${escapeHtml(user.email)}&gt;</p>
+    <p><strong>Category:</strong> ${escapeHtml(category)}</p>
+    <p><strong>Subject:</strong> ${escapeHtml(subject)}</p>
+    <hr />
+    <p>${escapeHtml(message).replace(/\n/g, "<br />")}</p>
+  `.trim();
+}
+
+function feedbackEmailText({ user, category, subject, message }) {
+  return [
+    "ArtifactHub feedback received.",
+    "",
+    `From: ${user.name} <${user.email}>`,
+    `Category: ${category}`,
+    `Subject: ${subject}`,
+    "",
+    message,
+  ].join("\n");
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function sendResendEmail({ to, subject, html, text, replyTo }) {
   if (!config.email.resendApiKey || !config.email.from) {
     return { sent: false, reason: "RESEND_NOT_CONFIGURED" };
   }
@@ -36,6 +67,7 @@ async function sendResendEmail({ to, subject, html, text }) {
       subject,
       html,
       text,
+      ...(replyTo ? { reply_to: replyTo } : {}),
     }),
   });
 
@@ -85,4 +117,38 @@ async function sendPasswordResetEmail({ to, resetUrl, expiresAt }) {
   return { sent: false, reason: "EMAIL_PROVIDER_DISABLED" };
 }
 
-export { sendPasswordResetEmail };
+async function sendFeedbackEmail({ user, category, subject, message }) {
+  const emailSubject = `[ArtifactHub feedback] ${subject}`;
+  const html = feedbackEmailHtml({ user, category, subject, message });
+  const text = feedbackEmailText({ user, category, subject, message });
+
+  if (config.email.provider === "resend") {
+    return sendResendEmail({
+      to: config.email.feedbackTo,
+      subject: emailSubject,
+      html,
+      text,
+      replyTo: user.email,
+    });
+  }
+
+  if (config.email.provider === "console") {
+    if (process.env.NODE_ENV === "production") {
+      return { sent: false, reason: "CONSOLE_EMAIL_BLOCKED_IN_PRODUCTION" };
+    }
+    console.log(`[ArtifactHub email:feedback] to=${config.email.feedbackTo}`);
+    console.log(text);
+    return { sent: true, provider: "console" };
+  }
+
+  if (config.email.provider === "test") {
+    if (process.env.NODE_ENV !== "test") {
+      return { sent: false, reason: "TEST_EMAIL_BLOCKED_OUTSIDE_TEST" };
+    }
+    return { sent: true, provider: "test" };
+  }
+
+  return { sent: false, reason: "EMAIL_PROVIDER_DISABLED" };
+}
+
+export { sendFeedbackEmail, sendPasswordResetEmail };
