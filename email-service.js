@@ -39,12 +39,23 @@ async function sendResendEmail({ to, subject, html, text }) {
     }),
   });
 
+  const body = await response.text();
   if (!response.ok) {
-    const body = await response.text();
     throw new Error(`Resend email failed with ${response.status}: ${body}`);
   }
 
-  return { sent: true, provider: "resend" };
+  let payload = null;
+  try {
+    payload = body ? JSON.parse(body) : null;
+  } catch {
+    payload = null;
+  }
+
+  return {
+    sent: true,
+    provider: "resend",
+    providerMessageId: payload?.id || null,
+  };
 }
 
 async function sendPasswordResetEmail({ to, resetUrl, expiresAt }) {

@@ -641,6 +641,8 @@ app.post("/api/auth/password-reset/request", async (req, res) => {
       metadata: {
         emailDelivery: user ? (delivery.sent ? "sent" : "not_sent") : "no_account",
         emailProvider: user && delivery.sent ? delivery.provider : null,
+        emailProviderMessageId:
+          user && delivery.sent ? delivery.providerMessageId || null : null,
         failureReason: user && !delivery.sent ? delivery.reason || "UNKNOWN" : null,
       },
     });
@@ -858,13 +860,17 @@ app.post(
         targetUserId: target.id,
         targetType: "user",
         targetId: target.id,
-        metadata: { provider: delivery.provider || null },
+        metadata: {
+          provider: delivery.provider || null,
+          providerMessageId: delivery.providerMessageId || null,
+        },
       });
       await recordRequestUsage(req, "admin.password_reset_email_sent", {
         userId: req.user.id,
         metadata: {
           targetUserId: target.id,
           emailProvider: delivery.provider || null,
+          emailProviderMessageId: delivery.providerMessageId || null,
         },
       });
       res.json({ ok: true, emailSent: true });
