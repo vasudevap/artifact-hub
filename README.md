@@ -64,6 +64,10 @@ header and within the signed-in experience.
 - Creates immutable approved snapshots that can be reopened without losing
   prior versions
 - Provides export preview plus server-generated Markdown and DOCX files
+- Provides signed-in API Reference, Help Docs/FAQ, and Feedback pages from the
+  global rail
+- Sends password reset and signed-in feedback email through the configured
+  Resend transactional email provider
 - Gives configured administrators basic demo-account cleanup controls
 - Stores product state in PostgreSQL when `DATABASE_URL` is configured, with
   local JSON retained for local development only
@@ -192,8 +196,8 @@ authentication is required, `403` when a feature or administrator action is not
 allowed, `404` when an owner-scoped resource cannot be found, `409` for stale
 artifact revisions or blocked workflow transitions, `429` for auth or
 assistant rate limits, `500` for server failures, `502` for AI provider
-failures, and `503` when outbound AI/API calls or password-reset email delivery
-are unavailable.
+failures, and `503` when outbound AI/API calls or configured application email
+delivery are unavailable.
 
 ### Common Objects
 
@@ -393,12 +397,12 @@ NODE_ENV=production DATABASE_URL="your-postgres-url" npm run migrate:json-to-db
 ## Deploy To Render
 
 [`render.yaml`](render.yaml) defines the Node web service, PostgreSQL database,
-frontend build, and `DATABASE_URL` connection. The committed blueprint keeps
-`AI_FEATURE_ENABLED=false` and `AI_PROVIDER=fake` so hosted rollout starts in a
-safe AI-disabled state. After deploy, confirm `/api/health` reports PostgreSQL
-storage and the expected runtime AI settings, then set the real AI provider
-variables and an explicit beta allowlist only after the hosted empty-account
-flow passes smoke testing.
+frontend build, `DATABASE_URL` connection, trusted `PUBLIC_URL`, Resend email
+provider, and feedback recipient. The current hosted demo uses Render Postgres,
+`AI_FEATURE_ENABLED=true`, `AI_PROVIDER=openai`, and Resend-backed application
+email. After deploy, confirm `/api/health` reports PostgreSQL storage and the
+expected runtime AI settings, then verify signup, login, password reset,
+feedback delivery, and empty-account project behavior.
 
 ## Project Structure
 
@@ -417,6 +421,6 @@ storage.js      Core PostgreSQL and local-development persistence
 
 ArtifactHub is an active demo and does not provide production security,
 availability, backup, recovery, or support guarantees. Local JSON storage is
-for development only, account ownership and approval are single-user, password
-reset email delivery requires a configured provider, and PDF/share-link
+for development only, account ownership and approval are single-user,
+application email delivery requires a configured provider, and PDF/share-link
 workflows are not included.

@@ -879,6 +879,125 @@ describe("React application shell", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows pending and error guide feedback while preserving the drafted prompt on failure", async () => {
+    const user = userEvent.setup();
+    const currentProject = buildProject(
+      "project-1",
+      "Launch Project",
+      "Maya Chen",
+      [],
+    );
+    const artifact = {
+      id: "artifact-1",
+      ownerId: "user-1",
+      projectId: "project-1",
+      projectName: "Launch Project",
+      templateVersionId: null,
+      templateId: "project-charter",
+      title: "Project Charter",
+      status: "draft",
+      fieldValues: {
+        project_overview: "Existing overview",
+        objectives: ["Existing objective"],
+      },
+      revision: 3,
+      templateVersion: 2,
+      workflowStage: "drafting",
+      completeness: {
+        completed: 2,
+        total: 6,
+        percentage: 33,
+        missingFieldIds: ["scope"],
+      },
+      provenance: {
+        project_overview: {
+          artifactId: "artifact-1",
+          fieldId: "project_overview",
+          sourceType: "user-authored",
+          updatedAt: "2026-06-12T22:10:00.000Z",
+        },
+        objectives: {
+          artifactId: "artifact-1",
+          fieldId: "objectives",
+          sourceType: "user-authored",
+          updatedAt: "2026-06-12T22:10:00.000Z",
+        },
+      },
+      openFindings: [],
+      createdAt: "2026-06-12T22:00:00.000Z",
+      updatedAt: "2026-06-12T22:10:00.000Z",
+    };
+    currentProject.artifacts = [artifact];
+
+    let assistantTurnRequested = false;
+    let resolveAssistantTurn!: (value: Response) => void;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method || "GET";
+
+        if (url.endsWith("/api/auth/me")) {
+          return jsonResponse({
+            user: demoUser,
+            features: defaultFeatures,
+          });
+        }
+        if (url.endsWith("/api/projects") && method === "GET") {
+          return jsonResponse([currentProject]);
+        }
+        if (url.endsWith("/api/projects/project-1") && method === "GET") {
+          return jsonResponse(currentProject);
+        }
+        if (url.endsWith("/api/templates/project-charter?version=2")) {
+          return jsonResponse(demoTemplates[1]);
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/conversation")) {
+          return jsonResponse({ messages: [] });
+        }
+        if (url.endsWith("/api/projects/project-1/artifacts/artifact-1/assistant/turns")) {
+          assistantTurnRequested = true;
+          return await new Promise<Response>((resolve) => {
+            resolveAssistantTurn = resolve;
+          });
+        }
+
+        return jsonResponse({ error: `Unhandled request: ${url}` }, 404);
+      }),
+    );
+
+    renderApp("/projects/project-1/artifacts/artifact-1");
+
+    const prompt = "Draft the Scope section using confirmed project context only.";
+    const composer = await screen.findByPlaceholderText(
+      "Add project detail or ask for help refining a section.",
+    );
+
+    await user.type(composer, prompt);
+    await user.click(screen.getByRole("button", { name: "Send to Guide" }));
+
+    expect(await screen.findByText("Guide is working")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sending..." })).toBeDisabled();
+    expect(composer).toBeDisabled();
+
+    expect(assistantTurnRequested).toBe(true);
+    resolveAssistantTurn(
+      jsonResponse({ error: "ArtifactHub Guide could not complete that turn." }, 502),
+    );
+
+    expect(await screen.findByText("Guide needs attention")).toBeInTheDocument();
+    expect(
+      screen.getByText("ArtifactHub Guide could not complete that turn."),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(
+      "Add project detail or ask for help refining a section.",
+    )).toHaveValue(prompt);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send to Guide" })).toBeEnabled(),
+    );
+  });
+
   it("treats unchanged auto-updates as an informational no-op instead of a success", async () => {
     const user = userEvent.setup();
     const currentProject = buildProject("project-1", "Launch Project", "Maya Chen", [17]);
