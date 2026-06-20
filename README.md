@@ -44,10 +44,12 @@ Render](https://artifact-hub-y528.onrender.com/).
 The hosted service is an evaluation environment, not a production-ready
 release. Do not enter confidential, sensitive, regulated, or personally
 identifiable information. The application displays this disclosure in the
-header and within the signed-in experience.
+public landing experience and within the signed-in product.
 
 ## What The Demo Does Today
 
+- Opens on a public product-overview landing page with section-jump navigation
+  and top-level `Sign in` / `Create account` actions before workspace access
 - Supports account creation, sign in, sign out, token-based password reset
   confirmation, and signed-in password changes
 - Creates project workspaces and routes directly into reusable Project Context
@@ -102,6 +104,9 @@ npm start
 ```
 
 Open `http://localhost:3000`.
+
+The default local entry is the public landing page at `/`. Use `/auth` for the
+focused sign-in and account-creation screen.
 
 For frontend development, run the Express API with `npm start` and Vite with
 `npm run dev`, then open `http://localhost:5173`.

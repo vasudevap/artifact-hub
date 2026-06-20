@@ -261,10 +261,11 @@ function App() {
   return (
     <SessionContext.Provider value={value}>
       <Routes>
+        <Route path="/" element={<PublicLandingPage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/learn" element={<Navigate to="/" replace />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
-            <Route index element={<Navigate to="/projects" replace />} />
             <Route path="/admin" element={<AdminRoute />}>
               <Route index element={<AdminPage />} />
             </Route>
@@ -292,9 +293,7 @@ function App() {
                 />
               </Route>
             </Route>
-            <Route path="/about" element={<AboutShell />}>
-              <Route index element={<AboutPage />} />
-            </Route>
+            <Route path="/about" element={<AboutShell />} />
             <Route path="/api-reference" element={<ApiReferencePage />} />
             <Route path="/help" element={<HelpDocsPage />} />
             <Route path="/feedback" element={<FeedbackPage />} />
@@ -322,7 +321,7 @@ function ProtectedRoute() {
     <Outlet />
   ) : (
     <Navigate
-      to="/auth"
+      to="/"
       replace
       state={{ from: `${location.pathname}${location.search}${location.hash}` }}
     />
@@ -454,13 +453,21 @@ function AuthPage() {
   const { user, refresh } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
-  const resetToken = new URLSearchParams(location.search).get("resetToken");
+  const searchParams = new URLSearchParams(location.search);
+  const resetToken = searchParams.get("resetToken");
+  const requestedMode = searchParams.get("mode");
   const requestedDestination =
     typeof location.state?.from === "string" && location.state.from.startsWith("/")
       ? location.state.from
       : "/projects";
   const [mode, setMode] = useState<"login" | "signup" | "forgot" | "reset">(
-    resetToken ? "reset" : "login",
+    resetToken
+      ? "reset"
+      : requestedMode === "signup" ||
+          requestedMode === "forgot" ||
+          requestedMode === "login"
+        ? requestedMode
+        : "login",
   );
   const [message, setMessage] = useState("");
   const [postAuthDestination, setPostAuthDestination] = useState(requestedDestination);
@@ -538,6 +545,11 @@ function AuthPage() {
         <div className="demo-trust">
           <strong>Active Demo</strong>
           <span>Use fictional or non-sensitive project information.</span>
+        </div>
+        <div className="auth-story-actions">
+          <Link className="secondary-button auth-story-learn-button" to="/">
+            Back to overview
+          </Link>
         </div>
       </section>
       <section className="auth-card">
@@ -1936,6 +1948,15 @@ const aboutTocItems = [
   },
 ];
 
+const publicHeaderSectionLinks = [
+  { href: "#about-overview", label: "Overview" },
+  { href: "#about-today", label: "Today" },
+  { href: "#about-flow", label: "How It Works" },
+  { href: "#about-roadmap", label: "Roadmap" },
+  { href: "#about-founder", label: "Founder" },
+  { href: "#about-feedback", label: "Feedback" },
+];
+
 function AboutShell() {
   return (
     <div className="about-shell">
@@ -1961,13 +1982,72 @@ function AboutShell() {
         </Link>
       </aside>
       <div className="about-content">
-        <Outlet />
+        <AboutContent
+          heroActions={
+            <>
+              <Link className="primary-button" to="/projects">Explore ArtifactHub</Link>
+              <a className="secondary-button" href="mailto:artifacthub@grafley.com">
+                Share Feedback
+              </a>
+            </>
+          }
+        />
       </div>
     </div>
   );
 }
 
-function AboutPage() {
+function PublicLandingPage() {
+  const { user, loading } = useSession();
+
+  if (loading) return <FullPageLoading />;
+  if (user) return <Navigate to="/projects" replace />;
+
+  return (
+    <div className="public-about-stage">
+      <header className="public-about-header">
+        <div className="public-about-header-inner">
+          <Link className="public-about-brand" to="/auth" aria-label="Return to ArtifactHub sign in">
+            <ArtifactHubLogo variant="lockup-primary" className="public-about-lockup" />
+          </Link>
+          <nav className="public-about-header-nav" aria-label="Landing page sections">
+            {publicHeaderSectionLinks.map((item) => (
+              <a key={item.href} href={item.href} className="public-about-header-link">
+                {item.label}
+              </a>
+            ))}
+          </nav>
+          <div className="public-about-header-actions">
+            <Link className="secondary-button" to="/auth">
+              Sign in
+            </Link>
+            <Link className="primary-button" to="/auth?mode=signup">
+              Create account
+            </Link>
+          </div>
+        </div>
+      </header>
+      <AboutContent
+        heroActions={
+          <>
+            <Link className="primary-button" to="/auth?mode=signup">
+              Create account
+            </Link>
+            <Link className="secondary-button" to="/auth">
+              Sign in
+            </Link>
+          </>
+        }
+      />
+    </div>
+  );
+}
+
+function AboutContent({
+  heroActions,
+}: {
+  heroActions: ReactNode;
+}) {
   const [expandedRoadmapId, setExpandedRoadmapId] = useState<string | null>(null);
   const capabilities = [
     {
@@ -2132,12 +2212,7 @@ function AboutPage() {
             professionals turn reusable project context into structured,
             review-ready artifacts.
           </p>
-          <div className="about-actions">
-            <Link className="primary-button" to="/projects">Explore ArtifactHub</Link>
-            <a className="secondary-button" href="mailto:artifacthub@grafley.com">
-              Share Feedback
-            </a>
-          </div>
+          <div className="about-actions">{heroActions}</div>
         </div>
         <aside className="about-hero-card" aria-label="ArtifactHub product principle">
           <ArtifactHubLogo variant="mark-primary" className="about-hero-mark" />
@@ -5018,6 +5093,7 @@ type ArtifactHubLogoVariant =
   | "app-icon-dark"
   | "app-icon-light"
   | "lockup-dark"
+  | "lockup-primary"
   | "mark-primary"
   | "mark-white";
 
@@ -5033,9 +5109,11 @@ function ArtifactHubLogo({
       ? "var(--artifacthub-mark-color, #E6F2F1)"
       : variant === "lockup-dark" || variant === "mark-white"
         ? "#E6F2F1"
+        : variant === "lockup-primary"
+          ? "#0E6F70"
         : "#0E6F70";
   const hasAppTile = variant === "app-icon-dark" || variant === "app-icon-light";
-  const isLockup = variant === "lockup-dark";
+  const isLockup = variant === "lockup-dark" || variant === "lockup-primary";
   const viewBox = isLockup ? "0 0 560 150" : hasAppTile ? "0 0 128 128" : "0 0 120 112";
   const label = isLockup ? "ArtifactHub" : "ArtifactHub logo";
   const appTileFill =
@@ -5089,7 +5167,7 @@ function ArtifactHubLogo({
           fontSize="64"
           fontWeight="700"
           letterSpacing="-2"
-          fill="#FFFFFF"
+          fill={variant === "lockup-primary" ? "#111827" : "#FFFFFF"}
         >
           ArtifactHub
         </text>

@@ -928,6 +928,7 @@ h1 {
   display: grid;
   gap: 1rem;
   grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  scroll-margin-top: 7rem;
 }
 
 .about-today-layout {
@@ -1077,6 +1078,7 @@ h1 {
 .about-section {
   display: grid;
   gap: 1rem;
+  scroll-margin-top: 7rem;
 }
 
 .about-section-heading {
@@ -2207,6 +2209,22 @@ h1 {
   color: rgb(255 255 255 / 64%);
 }
 
+.auth-story-actions {
+  display: flex;
+  margin-top: 1.25rem;
+}
+
+.auth-story-learn-button.secondary-button {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(123 209 211 / 45%);
+  color: white;
+}
+
+.auth-story-learn-button.secondary-button:hover {
+  background: rgb(255 255 255 / 14%);
+  border-color: rgb(123 209 211 / 72%);
+}
+
 .auth-card {
   align-self: center;
   justify-self: center;
@@ -2232,6 +2250,82 @@ h1 {
   color: var(--accent-dark);
   cursor: pointer;
   padding: 0;
+}
+
+.public-about-stage {
+  background: #f6f4ef;
+  min-height: 100vh;
+}
+
+.public-about-header {
+  backdrop-filter: blur(12px);
+  background: rgb(246 244 239 / 92%);
+  border-bottom: 1px solid rgb(208 214 210 / 88%);
+  left: 0;
+  padding: 1rem 2.4rem;
+  position: sticky;
+  right: 0;
+  top: 0;
+  z-index: 10;
+}
+
+.public-about-header-inner {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin: 0 auto;
+  max-width: 1480px;
+  width: 100%;
+}
+
+.public-about-brand {
+  align-items: center;
+  color: inherit;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.public-about-lockup {
+  height: auto;
+  max-width: 250px;
+  width: min(54vw, 250px);
+}
+
+.public-about-header-nav {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: center;
+  min-width: 0;
+}
+
+.public-about-header-link {
+  border-radius: 999px;
+  color: #38505b;
+  display: inline-flex;
+  font-size: 0.8rem;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0.55rem 0.8rem;
+  white-space: nowrap;
+}
+
+.public-about-header-link:hover,
+.public-about-header-link:focus-visible {
+  background: rgb(8 119 124 / 7%);
+  color: var(--accent-dark);
+  outline: none;
+}
+
+.public-about-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: flex-end;
 }
 
 .project-shell {
@@ -4449,6 +4543,10 @@ h1 {
   .auth-story h1 {
     font-size: 3rem;
   }
+
+  .public-about-header {
+    padding: 1rem 1.5rem;
+  }
 }
 
 @media (max-width: 680px) {
@@ -4657,6 +4755,35 @@ h1 {
 
   .auth-card {
     padding: 2rem 1rem;
+  }
+
+  .public-about-header {
+    padding: 1rem;
+  }
+
+  .public-about-header-inner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .public-about-header-nav {
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+  }
+
+  .public-about-header-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .public-about-header-actions {
+    justify-content: stretch;
+  }
+
+  .public-about-header-actions .primary-button,
+  .public-about-header-actions .secondary-button {
+    width: 100%;
   }
 
   .project-sidebar {
