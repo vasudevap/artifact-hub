@@ -225,7 +225,7 @@ function buildFindingPresentation(
   };
 }
 
-function App() {
+function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [features, setFeatures] = useState(emptyFeatures);
   const [loading, setLoading] = useState(true);
@@ -260,18 +260,53 @@ function App() {
 
   return (
     <SessionContext.Provider value={value}>
-      <Routes>
+      {children}
+    </SessionContext.Provider>
+  );
+}
+
+function App() {
+  return (
+    <SessionProvider>
+      <Routes>{renderAppRouteElements(false)}</Routes>
+    </SessionProvider>
+  );
+}
+
+function AppRouterRoot() {
+  return (
+    <SessionProvider>
+      <Outlet />
+    </SessionProvider>
+  );
+}
+
+export function getAppRouteElements() {
+  return (
+    <Route element={<AppRouterRoot />}>
+      {renderAppRouteElements(true)}
+    </Route>
+  );
+}
+
+function renderAppRouteElements(useRootIndex: boolean) {
+  return (
+    <>
+      {useRootIndex ? (
+        <Route index element={<PublicLandingPage />} />
+      ) : (
         <Route path="/" element={<PublicLandingPage />} />
-        <Route path="/auth" element={<AuthPage />} />
-        <Route path="/learn" element={<Navigate to="/" replace />} />
-        <Route element={<ProtectedRoute />}>
-          <Route element={<AppShell />}>
-            <Route path="/admin" element={<AdminRoute />}>
-              <Route index element={<AdminPage />} />
-            </Route>
-            <Route path="/projects" element={<ProjectsShell />}>
-              <Route index element={<ProjectsPage />} />
-              <Route path=":projectId" element={<ProjectWorkspaceShell />}>
+      )}
+      <Route path="auth" element={<AuthPage />} />
+      <Route path="learn" element={<Navigate to="/" replace />} />
+      <Route element={<ProtectedRoute />}>
+        <Route element={<AppShell />}>
+          <Route path="admin" element={<AdminRoute />}>
+            <Route index element={<AdminPage />} />
+          </Route>
+          <Route path="projects" element={<ProjectsShell />}>
+            <Route index element={<ProjectsPage />} />
+            <Route path=":projectId" element={<ProjectWorkspaceShell />}>
               <Route index element={<ProjectOverviewPage />} />
               <Route path="context" element={<ProjectContextPage />} />
               <Route path="library" element={<Navigate to="/library" replace />} />
@@ -282,34 +317,33 @@ function App() {
               <Route
                 path="artifacts/:artifactId"
                 element={<ArtifactEditorPage />}
-                />
-                <Route
-                  path="artifacts/:artifactId/review"
-                  element={<ArtifactReviewPage />}
-                />
-                <Route
-                  path="artifacts/:artifactId/export"
-                  element={<ExportPreviewPage />}
-                />
-              </Route>
-            </Route>
-            <Route path="/about" element={<AboutShell />} />
-            <Route path="/api-reference" element={<ApiReferencePage />} />
-            <Route path="/help" element={<HelpDocsPage />} />
-            <Route path="/feedback" element={<FeedbackPage />} />
-            <Route path="/activity" element={<GlobalActivityPage />} />
-            <Route path="/library" element={<LibraryShell />}>
-              <Route index element={<ArtifactLibraryPage />} />
+              />
               <Route
-                path="artifacts/:artifactId"
-                element={<ArtifactEditorPage />}
+                path="artifacts/:artifactId/review"
+                element={<ArtifactReviewPage />}
+              />
+              <Route
+                path="artifacts/:artifactId/export"
+                element={<ExportPreviewPage />}
               />
             </Route>
           </Route>
+          <Route path="about" element={<AboutShell />} />
+          <Route path="api-reference" element={<ApiReferencePage />} />
+          <Route path="help" element={<HelpDocsPage />} />
+          <Route path="feedback" element={<FeedbackPage />} />
+          <Route path="activity" element={<GlobalActivityPage />} />
+          <Route path="library" element={<LibraryShell />}>
+            <Route index element={<ArtifactLibraryPage />} />
+            <Route
+              path="artifacts/:artifactId"
+              element={<ArtifactEditorPage />}
+            />
+          </Route>
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </SessionContext.Provider>
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </>
   );
 }
 
@@ -683,18 +717,21 @@ function AppShell() {
               icon="{ }"
               label="API Reference"
               active={apiReferenceActive}
+              compactHidden
             />
             <RailLink
               to="/help"
               icon="?"
               label="Help Docs"
               active={helpActive}
+              compactHidden
             />
             <RailLink
               to="/feedback"
               icon="✉"
               label="Feedback"
               active={feedbackActive}
+              compactHidden
             />
           </div>
           <button
@@ -769,16 +806,18 @@ function RailLink({
   icon,
   label,
   active,
+  compactHidden = false,
 }: {
   to: string;
   icon: string;
   label: string;
   active: boolean;
+  compactHidden?: boolean;
 }) {
   return (
     <Link
       to={to}
-      className={`rail-link ${active ? "active" : ""}`}
+      className={`rail-link ${compactHidden ? "rail-link-compact-hidden" : ""} ${active ? "active" : ""}`}
       aria-current={active ? "page" : undefined}
     >
       <span>{icon}</span>

@@ -65,8 +65,12 @@ async function run() {
 
     const testEmail = `browser-${Date.now()}@example.com`;
 
+    await page.goto(`${baseUrl}/auth`);
+    await page.getByRole("heading", { name: "Sign in to ArtifactHub" }).waitFor();
+
     await page.goto(baseUrl);
-    await page.getByRole("button", { name: "Create account" }).click();
+    await page.getByRole("link", { name: "Create account" }).first().click();
+    await page.getByRole("heading", { name: "Start with a project" }).waitFor();
     await page.getByLabel("Name", { exact: true }).fill("Browser Test");
     await page.getByLabel("Email", { exact: true }).fill(testEmail);
     await page.getByLabel(/Password/).fill("browser-pass-123");
@@ -110,7 +114,7 @@ async function run() {
       const mobileHeader = document.querySelector(".mobile-header");
       const railLinks = Array.from(
         document.querySelectorAll(".global-rail .rail-link"),
-      );
+      ).filter((link) => getComputedStyle(link).display !== "none");
 
       return {
         clientWidth: document.body.clientWidth,
@@ -307,8 +311,13 @@ async function run() {
     assert.notEqual(profileHoverBackground, "rgba(0, 0, 0, 0)");
     assert.equal(logoutHoverBackground, profileHoverBackground);
 
-    const charterCard = page.locator("article").filter({ hasText: "Project Charter" });
-    await charterCard.getByRole("button", { name: "Start draft" }).click();
+    const charterCard = page.locator("article.template-card").filter({
+      has: page.getByRole("heading", { name: "Project Charter" }),
+    });
+    await Promise.all([
+      page.waitForURL(/\/library\/artifacts\/[^/]+$/),
+      charterCard.getByRole("button", { name: "Start draft" }).click(),
+    ]);
     await page.getByRole("heading", { name: "Project Charter" }).waitFor();
     await page
       .getByRole("navigation", { name: "Unassigned drafts" })
@@ -358,12 +367,17 @@ async function run() {
     await page.getByText("Review summary", { exact: true }).waitFor();
     await page.getByText("5 blockers", { exact: false }).waitFor();
     const approveButtons = page.getByRole("button", {
-      name: "Approve and export",
+      name: "Approve version",
+    });
+    const exportPreviewButtons = page.getByRole("button", {
+      name: "Export preview",
     });
     assert.equal(await approveButtons.count(), 2);
-    for (const button of await approveButtons.all()) {
-      assert.equal(await button.isDisabled(), true);
-    }
+    assert.equal(await exportPreviewButtons.count(), 2);
+    await approveButtons.first().click();
+    await page
+      .getByText("Approval is blocked until 5 blocking items are resolved.")
+      .waitFor();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("link", { name: "Return to editing" }).click();
@@ -375,7 +389,21 @@ async function run() {
 
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.getByRole("button", { name: "Log out" }).click();
-    await page.getByRole("heading", { name: "Sign in to ArtifactHub" }).waitFor();
+    await page.waitForURL((url) => url.pathname === "/" || url.pathname === "/auth");
+    const signInHeading = page.getByRole("heading", { name: "Sign in to ArtifactHub" });
+    if (!(await signInHeading.isVisible())) {
+      await page.goto(baseUrl);
+      assert.equal(
+        await page.getByRole("link", { name: "Sign in" }).first().getAttribute("href"),
+        "/auth",
+      );
+      await page.getByRole("link", { name: "Sign in" }).first().click();
+    }
+    const backToSignIn = page.getByRole("button", { name: "Back to sign in" });
+    if (await backToSignIn.isVisible()) {
+      await backToSignIn.click();
+    }
+    await signInHeading.waitFor();
     assert.match(page.url(), /\/auth$/);
     await page.getByLabel("Email", { exact: true }).fill(testEmail);
     await page.getByLabel(/Password/).fill("browser-pass-123");
